@@ -114,11 +114,18 @@ def check_price_completeness(
     price_cols = [c for c in PRICE_COLUMNS if c in prices]
     if "close" not in price_cols:
         raise MissingDataError(ticker, "close", "column missing", "a close column")
+    volume = pd.to_numeric(prices["volume"], errors="coerce") if "volume" in prices else None
+    # A day without trades has zero volume and, on some sources, no prices at all ("---").
+    # That is a real market state, not missing data, as long as *every* price is absent.
+    no_price = pd.concat(
+        [pd.to_numeric(prices[c], errors="coerce").isna() for c in price_cols], axis=1
+    ).all(axis=1)
+    priceless_no_trade = no_price & (volume == 0) if volume is not None else no_price & False
     for col in [*price_cols, "volume"]:
         if col not in prices:
             continue
         values = pd.to_numeric(prices[col], errors="coerce")
-        null = values.isna()
+        null = values.isna() & ~(priceless_no_trade if col != "volume" else False)
         if null.any():
             raise MissingDataError(ticker, col, _iso(dates[null]), "no null/NaN values")
         negative = values < 0
@@ -138,15 +145,17 @@ def check_price_completeness(
         raise AnomalyError(ticker, "date", _iso(non_trading), "rows only on trading days")
 
     issues: list[ValidationIssue] = []
-    if "volume" in prices:
-        no_trades = dates[pd.to_numeric(prices["volume"]) == 0]
+    if volume is not None:
+        no_trades = dates[volume == 0]
         if not no_trades.empty:
+            priceless = int(priceless_no_trade.sum())
             issues.append(
                 ValidationIssue(
                     ticker,
                     "no_trades",
                     IssueSeverity.INFO,
-                    f"{len(no_trades)} day(s) with a price but zero volume (no trades)",
+                    f"{len(no_trades)} day(s) with zero volume (no trades); "
+                    f"{priceless} of them have no price",
                     tuple(no_trades),
                 )
             )

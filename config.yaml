@@ -207,6 +207,11 @@ data_sources:
   official:
     # Minimum delay between requests to TWSE / TPEx / MOPS endpoints.
     min_request_interval_seconds: 3.0
+  yahoo:
+    min_request_interval_seconds: 1.0
+  # Cached responses older than this are refetched, never served as current data.
+  cache_max_age_hours: 12
+  request_timeout_seconds: 60
   # Mainstream sites are never scraped by default; reports only link to them.
   scrape_reference_sites: false
 

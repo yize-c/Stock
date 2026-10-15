@@ -408,10 +408,17 @@ class OfficialSourceConfig(_Model):
     min_request_interval_seconds: Annotated[float, Field(ge=0.0)]
 
 
+class YahooSourceConfig(_Model):
+    min_request_interval_seconds: Annotated[float, Field(ge=0.0)]
+
+
 class DataSourcesConfig(_Model):
     cache_dir: Path
     finmind: FinMindConfig
     official: OfficialSourceConfig
+    yahoo: YahooSourceConfig
+    cache_max_age_hours: PositiveFloat
+    request_timeout_seconds: PositiveFloat
     scrape_reference_sites: bool
 
 

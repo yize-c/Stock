@@ -293,3 +293,29 @@ def test_health_report_records_pass_fail_and_issues() -> None:
     assert not report.passed
     assert [c.name for c in report.checks] == ["completeness", "freshness"]
     assert report.sources[0].source == "twse"
+
+
+def test_priceless_no_trade_day_is_notice_not_error() -> None:
+    # TPEx reports "---" for every price on a day without trades (see tpex fixture).
+    df = prices()
+    df["open"] = df["close"]
+    df.loc[4, ["open", "close"]] = float("nan")
+    df.loc[4, "volume"] = 0
+    issues = check_price_completeness("2330", df, CAL)
+    assert issues[0].check == "no_trades" and "1 of them have no price" in issues[0].detail
+
+
+def test_missing_price_with_volume_is_still_an_error() -> None:
+    df = prices()
+    df.loc[4, "close"] = float("nan")  # volume 1000 but no close
+    with pytest.raises(MissingDataError, match="close"):
+        check_price_completeness("2330", df, CAL)
+
+
+def test_partially_missing_prices_on_no_trade_day_is_error() -> None:
+    df = prices()
+    df["open"] = df["close"]
+    df.loc[4, "close"] = float("nan")  # open present, close missing
+    df.loc[4, "volume"] = 0
+    with pytest.raises(MissingDataError, match="close"):
+        check_price_completeness("2330", df, CAL)
