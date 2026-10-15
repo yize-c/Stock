@@ -319,3 +319,34 @@ def test_partially_missing_prices_on_no_trade_day_is_error() -> None:
     df.loc[4, "volume"] = 0
     with pytest.raises(MissingDataError, match="close"):
         check_price_completeness("2330", df, CAL)
+
+
+def test_known_suspension_gap_is_notice() -> None:
+    from stock_research.config import KnownSuspension
+
+    gap = [date(2024, 7, 10), date(2024, 7, 11)]
+    days = [d for d in JULY_2024_CLOSES if d not in gap]
+    halt = KnownSuspension(
+        ticker="2330", start=date(2024, 7, 10), end=date(2024, 7, 11), reason="Pending announcement"
+    )
+    issues = check_price_completeness("2330", prices(days=days), CAL, [halt])
+    assert issues[0].check == "known_suspension"
+    assert issues[0].dates == tuple(gap)
+    assert "Pending announcement" in issues[0].detail
+
+
+def test_suspension_of_other_ticker_or_outside_range_still_raises() -> None:
+    from stock_research.config import KnownSuspension
+
+    days = [d for d in JULY_2024_CLOSES if d not in (date(2024, 7, 10), date(2024, 7, 15))]
+    halt = KnownSuspension(
+        ticker="2330", start=date(2024, 7, 10), end=date(2024, 7, 10), reason="x"
+    )
+    with pytest.raises(MissingDataError) as exc:
+        check_price_completeness("2330", prices(days=days), CAL, [halt])
+    assert exc.value.actual == ["2024-07-15"]
+    other = KnownSuspension(
+        ticker="2317", start=date(2024, 7, 1), end=date(2024, 7, 31), reason="x"
+    )
+    with pytest.raises(MissingDataError):
+        check_price_completeness("2330", prices(days=days), CAL, [other])

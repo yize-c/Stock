@@ -56,6 +56,10 @@ markets:
       # Before this time on a trading day, the latest expected close is the previous
       # trading day (covers the session itself and the gap until official data is out).
       daily_data_ready_time: "14:30"
+    # Known trading suspensions (停牌). Missing prices inside these ranges are expected and
+    # listed in the data-health report; gaps outside them still raise.
+    # Format: - { ticker: "1234", start: 2024-03-01, end: 2024-03-15, reason: "..." }
+    known_suspensions: []
     benchmark:
       # Total-return index matches returns computed from dividend-adjusted prices.
       primary: TAIEX_TOTAL_RETURN

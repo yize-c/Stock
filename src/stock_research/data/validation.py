@@ -18,7 +18,7 @@ from typing import Any
 
 import pandas as pd
 
-from stock_research.config import PriceLimitConfig
+from stock_research.config import KnownSuspension, PriceLimitConfig
 from stock_research.data.errors import (
     AnomalyError,
     DataValidationError,
@@ -100,9 +100,16 @@ def check_freshness(
 
 
 def check_price_completeness(
-    ticker: str, prices: pd.DataFrame, calendar: TradingCalendar
+    ticker: str,
+    prices: pd.DataFrame,
+    calendar: TradingCalendar,
+    known_suspensions: Iterable[KnownSuspension] = (),
 ) -> list[ValidationIssue]:
-    """Nulls, negatives, zero prices, duplicate days, gaps; returns no-trade-day notices."""
+    """Nulls, negatives, zero prices, duplicate days, gaps; returns notices.
+
+    Gaps covered by a known suspension of this ticker are expected and reported as a notice;
+    any other gap raises.
+    """
     if prices.empty:
         raise MissingDataError(ticker, "prices", "empty", "at least one row")
     dates = pd.to_datetime(prices["date"]).dt.date
@@ -138,15 +145,32 @@ def check_price_completeness(
             if zero.any():
                 raise AnomalyError(ticker, col, _iso(dates[zero]), "prices > 0")
 
+    suspensions = [s for s in known_suspensions if s.ticker == ticker]
     gaps = calendar.missing_trading_days(dates, min(dates), max(dates))
-    if gaps:
-        raise MissingDataError(ticker, "date", _iso(gaps), "every trading day present")
+    suspended = [d for d in gaps if any(s.covers(d) for s in suspensions)]
+    unexplained = [d for d in gaps if d not in suspended]
+    if unexplained:
+        raise MissingDataError(
+            ticker, "date", _iso(unexplained), "every trading day present or a known suspension"
+        )
 
     non_trading = [d for d in dates if not calendar.is_trading_day(d)]
     if non_trading:
         raise AnomalyError(ticker, "date", _iso(non_trading), "rows only on trading days")
 
     issues: list[ValidationIssue] = []
+    if suspended:
+        reasons = sorted({s.reason for s in suspensions for d in suspended if s.covers(d)})
+        issues.append(
+            ValidationIssue(
+                ticker,
+                "known_suspension",
+                IssueSeverity.INFO,
+                f"{len(suspended)} trading day(s) without data during known suspension(s): "
+                + "; ".join(reasons),
+                tuple(suspended),
+            )
+        )
     if volume is not None:
         no_trades = dates[volume == 0]
         if not no_trades.empty:

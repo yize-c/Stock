@@ -133,6 +133,22 @@ class TradingCalendarConfig(_Model):
         return self
 
 
+class KnownSuspension(_Model):
+    ticker: Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]
+    start: date
+    end: date
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _check(self) -> KnownSuspension:
+        if self.end < self.start:
+            raise ValueError(f"suspension of {self.ticker} ends before it starts")
+        return self
+
+    def covers(self, day: date) -> bool:
+        return self.start <= day <= self.end
+
+
 class TwBenchmarkConfig(_Model):
     primary: str
     fallback_ticker: str
@@ -178,6 +194,7 @@ class TwMarketConfig(_Model):
     price_limits: PriceLimitConfig
     filing_deadlines: FilingDeadlineConfig
     trading_calendar: TradingCalendarConfig
+    known_suspensions: list[KnownSuspension]
     benchmark: TwBenchmarkConfig
     risk_free: RiskFreeConfig
     industry_classification: str

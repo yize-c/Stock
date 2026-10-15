@@ -240,3 +240,18 @@ def test_duplicate_manual_closures_raise(raw_config, write_config) -> None:
     raw_config["markets"]["tw"]["trading_calendar"]["manual_closures"] = [closure, closure]
     with pytest.raises(ConfigError, match="duplicate"):
         load_config(write_config(raw_config))
+
+
+def test_known_suspensions_parse_and_validate(raw_config, write_config) -> None:
+    tw = raw_config["markets"]["tw"]
+    tw["known_suspensions"] = [
+        {"ticker": "2330", "start": date(2024, 3, 1), "end": date(2024, 3, 5), "reason": "halt"}
+    ]
+    cfg = load_config(write_config(raw_config))
+    assert cfg.markets.tw.known_suspensions[0].covers(date(2024, 3, 5))
+    tw["known_suspensions"][0]["end"] = date(2024, 2, 1)
+    with pytest.raises(ConfigError, match="ends before"):
+        load_config(write_config(raw_config))
+    tw["known_suspensions"][0].update(end=date(2024, 3, 5), ticker="0050")
+    with pytest.raises(ConfigError, match="ticker"):
+        load_config(write_config(raw_config))

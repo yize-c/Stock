@@ -8,7 +8,22 @@ tests whether those results held both before and after the 2020 pandemic regime 
 is used only to summarize filings and explain computed numbers. Every claim it makes must cite a
 source, and code checks that each citation is real.
 
-> **Status:** stage 1 of 11 (project skeleton). Data fetching and analysis are not implemented yet.
+> **Status:** stage 3 of 11 (data layer) in progress. Analysis is not implemented yet.
+> Full requirements: [`docs/stock-research-prompt.md`](docs/stock-research-prompt.md) (Traditional Chinese).
+
+## Data sources and known limitations
+
+| Source | Used for | Status |
+|---|---|---|
+| TPEx OpenAPI | TPEx listings, today's quotes, ex-rights reference prices, current-month index | Implemented |
+| Yahoo Finance (`yfinance`) | Second price source for cross-checks, TAIEX closes | Implemented |
+| FinMind API | Adjusted prices, statements, monthly revenue, dividends, total-return index | Envelope only; datasets pending |
+| TWSE, MOPS | Official prices, calendar, filings | Not reachable from the cloud dev environment |
+
+Consequences: historical trading days come from TAIEX dates in FinMind/Yahoo rather than the
+official TWSE series, and TWSE-listed stocks are cross-checked between FinMind and Yahoo only.
+The data-health report states these limitations. Yahoo closes are split-adjusted (Taiwan stock
+dividends appear as splits), so periods around such events are excluded from cross-checks.
 
 ## Design principles
 
