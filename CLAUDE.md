@@ -36,7 +36,7 @@
 - 櫃買中心 OpenAPI 只有當日／當月資料；Yahoo 的 Close 已做分割調整（台股配股也被當成分割），成交量與官方不一致，不可當準。
 - 已知停牌放 `markets.tw.known_suspensions`，清單內缺資料視為正常，清單外仍報錯。
 
-## 第 3 階段實作時發現的資料限制（需使用者確認）
+## 第 3 階段實作時發現的資料限制（使用者已同意）
 - FinMind 免費版拿不到還原股價（`TaiwanStockPriceAdj` 需付費），改由程式用除權息、減資、分割的參考價自行還原（`data/adjustment.py`）；`as_of` 之後的事件不套用。
 - FinMind 除權息參考價與加權報酬指數都從 2003 年開始 → 股價只用 2003 年起（`data_sources.finmind.price_history_start`）。
 - FinMind／Yahoo 股價含上市前的興櫃交易，一律剔除。上市日 = 首次交易後 `TaiwanStockPER` 的第一天（只涵蓋上市櫃股票）；上櫃股票再與櫃買中心官方上櫃日比對；推不出來的放 `markets.tw.listing.overrides`。
