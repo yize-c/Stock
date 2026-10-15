@@ -1,0 +1,232 @@
+# stock-research configuration.
+#
+# Conventions:
+# - Ratios and percentages are stored as fractions (0.15 = 15%, 0.03 = 3 percentage points).
+# - Every threshold used by the code lives here; nothing market- or framework-specific is
+#   hard-coded in Python.
+# - Secrets (API keys, tokens) never belong in this file. Put them in `.env`.
+
+general:
+  timezone: Asia/Taipei
+  default_market: tw
+  # Pandemic regime split. V1 = post_2020, V3 = pre_2020 (see README "Time windows").
+  regime_split_date: 2020-01-01
+  # Financial statements before this year (pre-IFRS) are excluded from every window.
+  ifrs_start_year: 2013
+
+markets:
+  tw:
+    enabled: true
+    currency: TWD
+    exchanges:
+      TWSE:
+        yfinance_suffix: ".TW"
+      TPEX:
+        yfinance_suffix: ".TWO"
+    price_limits:
+      # Daily limit on the raw close, applied by effective date.
+      # `effective_from: null` means "from the earliest available data".
+      rules:
+        - effective_from: null
+          limit: 0.07
+        - effective_from: 2015-06-01
+          limit: 0.10
+      rounding_tolerance: 0.005
+      # Newly listed stocks have no daily limit for their first N trading days.
+      new_listing_exempt_days: 5
+    filing_deadlines:
+      # Statutory deadline per fiscal quarter, used as a conservative `available_date`
+      # when the real announcement date is unknown. Q4 (annual report) is due next year.
+      quarterly:
+        Q1: { month: 5, day: 15, year_offset: 0 }
+        Q2: { month: 8, day: 14, year_offset: 0 }
+        Q3: { month: 11, day: 14, year_offset: 0 }
+        Q4: { month: 3, day: 31, year_offset: 1 }
+      # Monthly revenue for month M is due by this day of month M+1.
+      monthly_revenue_day: 10
+    trading_calendar:
+      # Historical trading days = dates with an official TAIEX close, so past typhoon
+      # closures drop out automatically. Future/today use the exchange holiday notice.
+      historical_source: official_index_closes
+      # Ad-hoc closures (e.g. typhoon days) not yet in the exchange notice.
+      # Format: - { date: 2026-07-30, reason: "Typhoon closure" }
+      manual_closures: []
+    benchmark:
+      # Total-return index matches returns computed from dividend-adjusted prices.
+      primary: TAIEX_TOTAL_RETURN
+      # Used (and noted in the report) only if the total-return index is unavailable.
+      fallback_ticker: "0050"
+      fallback_uses_adjusted_prices: true
+    risk_free:
+      # One-year time deposit rate, averaged over each window. Source: Central Bank of
+      # the Republic of China (Taiwan) statistics.
+      source: cbc_one_year_deposit
+      # Per-period fallback rates if the CBC series cannot be fetched.
+      # Format: - { start: 2016-01-01, end: 2019-12-31, rate: 0.0104 }
+      # Left empty on purpose: fill in from CBC data before relying on the fallback.
+      # With no fallback, an unavailable CBC series raises an error.
+      fallback_rates: []
+    industry_classification: twse_tpex
+    data_validation:
+      # Raw-close cross-check between official, FinMind and yfinance.
+      cross_source_tolerance: 0.005
+      cross_source_lookback_trading_days: 60
+      # |assets - (liabilities + equity)| / assets above this triggers a warning.
+      balance_sheet_tolerance: 0.01
+      # Monthly revenue is flagged as suspicious when |YoY| exceeds this.
+      revenue_yoy_abs_max: 5.0
+  us:
+    # Planned for stage 11. Present so the config shape already supports it.
+    enabled: false
+    currency: USD
+    benchmark:
+      primary: SPY
+
+weighting:
+  # weight = 0.5 ** (age_days / half_life_days); age measured from the window end.
+  # V2 (full) is never weighted.
+  half_life_days:
+    daily_returns: 90
+    monthly_revenue: 365
+    quarterly_financials: 730
+    annual_financials: 1095
+    news_text: 30
+
+stability:
+  # Economic difference: relative gap for level metrics.
+  relative_tolerance: 0.15
+  # Economic difference: absolute (percentage-point) gap for ratio metrics.
+  # Only ROE (3pp) is given by the spec; the rest are proposed defaults to review.
+  absolute_tolerance:
+    roe: 0.03
+    roic: 0.03
+    gross_margin: 0.03
+    operating_margin: 0.03
+    net_margin: 0.03
+    revenue_yoy: 0.05
+    annualized_return: 0.05
+    annualized_volatility: 0.05
+    dividend_yield: 0.01
+  # Framework and composite scores (0-1 proportions).
+  score_tolerance: 0.15
+  alpha: 0.05
+  multiple_testing: benjamini_hochberg
+  min_samples:
+    econ_observations: 2
+    ttm_quarters: 4
+    daily_observations: 60
+    monthly_observations: 24
+    # Below this many observations the result carries a LOW_SAMPLE flag.
+    low_sample_threshold: 8
+  internal_split:
+    # "midpoint" splits V1 at its midpoint (moves with as_of); "fixed" uses fixed_date.
+    mode: midpoint
+    fixed_date: null
+  crash_exclusion:
+    price_start: 2020-02-20
+    price_end: 2020-06-30
+    annual_years: [2020]
+    # Any TTM value that includes one of these quarters is excluded.
+    quarters: ["2020Q1", "2020Q2"]
+  breakpoints:
+    # Quandt-Andrews trimming on each end; critical values from Andrews (1993).
+    trimming: 0.15
+
+frameworks:
+  # Rules that ask for 10 years use "all available years, at least min_years" in V1/V3.
+  min_years: 5
+  original_years: 10
+  definitions:
+    recent_years: 5
+    # "Increasing year over year": at least this many non-decreasing years in recent_years.
+    increasing_min_years: 4
+    # "Keeps making new highs": at least one window-high month in this many recent months.
+    new_high_lookback_months: 12
+  warren_chou:
+    max_recent_quarter_eps_yoy_decline: 0.30
+    reference_yield_range: [0.05, 0.06]
+  guyu:
+    core_profit_ratio_min: 0.80
+    interest_coverage_min: 20
+    roe_min: 0.08
+    operating_margin_min: 0.0
+    pe_max: 12
+    dividend_yield_min: 0.06
+    excluded_industries: [financial, construction]
+    expected_roe_by_industry:
+      semiconductor: 0.10
+      mature_electronics: 0.08
+      traditional: 0.06
+  chen_chung_ming:
+    preferred_industries: [financial, consumer_staples, telecom]
+  buffett:
+    roe_min: 0.15
+    # Spec says "below a threshold" without a value; 0.5 is a proposed default to review.
+    debt_to_equity_max: 0.5
+    fcf_positive_year_ratio_min: 0.8
+  graham:
+    pe_times_pb_max: 22.5
+    current_ratio_min: 2.0
+  lynch:
+    peg_max: 1.0
+    # Growth-category boundaries on 5-year EPS CAGR; proposed defaults to review.
+    growth_categories:
+      slow_grower_max: 0.06
+      stalwart_max: 0.20
+  munger:
+    roic_min: 0.12
+
+scoring:
+  # Member weights are shares of the total score and must sum to the group weight.
+  # N/A frameworks are renormalized within their group first, then groups are combined.
+  groups:
+    taiwan:
+      weight: 0.6
+      members:
+        warren_chou: 0.2
+        guyu: 0.2
+        chen_chung_ming: 0.2
+    international:
+      weight: 0.4
+      members:
+        buffett: 0.1
+        graham: 0.1
+        lynch: 0.1
+        munger: 0.1
+
+data_sources:
+  cache_dir: .cache/stock_research
+  finmind:
+    # Free tier allows a few hundred requests per hour; stay below it.
+    max_requests_per_hour: 300
+  official:
+    # Minimum delay between requests to TWSE / TPEx / MOPS endpoints.
+    min_request_interval_seconds: 3.0
+  # Mainstream sites are never scraped by default; reports only link to them.
+  scrape_reference_sites: false
+
+risk:
+  var_confidence: 0.95
+  annualization_days: 252
+  # Shown next to risk metrics so readers know whether a window contains them.
+  major_events:
+    - { name: "2008 global financial crisis", start: 2008-09-01, end: 2009-03-31 }
+    - { name: "2015 price-limit widening to 10%", start: 2015-06-01, end: 2015-06-01 }
+    - { name: "2020 pandemic crash", start: 2020-02-20, end: 2020-06-30 }
+    - { name: "2022 rate hikes and TAIEX correction", start: 2022-01-01, end: 2022-12-31 }
+
+technicals:
+  sma_windows: [20, 60, 240]
+  rsi_window: 14
+  macd: { fast: 12, slow: 26, signal: 9 }
+
+llm:
+  provider: anthropic
+  model: claude-opus-5-5
+  temperature: 0.0
+  max_retries: 1
+  log_dir: logs/llm
+
+report:
+  language: zh-TW
+  output_dir: reports
