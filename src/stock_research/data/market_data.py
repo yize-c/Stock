@@ -23,6 +23,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import TypeVar
 from zoneinfo import ZoneInfo
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -36,6 +37,7 @@ from stock_research.data.errors import (
     SourceMismatchError,
 )
 from stock_research.data.fetchers.finmind import (
+    EventKind,
     FinMindClient,
     FinMindFetcher,
     Statement,
@@ -45,6 +47,7 @@ from stock_research.data.fetchers.tpex import TpexFetcher
 from stock_research.data.fetchers.yahoo import YahooFetcher
 from stock_research.data.http import JsonClient, RateLimiter
 from stock_research.data.point_in_time import as_of_view
+from stock_research.data.shares import ShareBasis, check_share_count, share_basis, share_counts
 from stock_research.data.validation import (
     HealthReport,
     SourceStatus,
@@ -278,10 +281,46 @@ class MarketData:
         return as_of_view(rows, as_of).reset_index(drop=True)
 
     def dividends(self, ticker: Ticker, as_of: date) -> pd.DataFrame:
-        start = date(self._config.general.ifrs_start_year, 1, 1)
+        """Declared dividends and rights offerings announced by ``as_of``.
+
+        Fetched from the price-history start: share multipliers need every stock dividend
+        behind the price events, not only the IFRS years.
+        """
+        start = self._config.data_sources.finmind.price_history_start
         rows = self._finmind.dividends(ticker.code, start, self.today())
         visible = pd.to_datetime(rows["available_date"]) <= pd.Timestamp(as_of)
         return rows.loc[visible].reset_index(drop=True)
+
+    def share_basis(self, ticker: Ticker, as_of: date) -> ShareBasis:
+        """Share multipliers from the price events applied as of ``as_of``.
+
+        The basis starts at the IFRS start. Par at that date is TPEx's official par (TPEx
+        stocks, backed out through every later split) or the configured default (TWSE).
+        """
+        per_share = self._tw.per_share
+        start = date(self._config.general.ifrs_start_year, 1, 1)
+        events = self.prices(ticker, as_of).events
+        initial_par = per_share.default_par_value
+        if ticker.market is Market.TPEX and self._tpex is not None:
+            companies = self._tpex.listed_companies()
+            row = companies.loc[companies["code"] == ticker.code]
+            if row.empty:
+                raise MissingDataError(ticker.code, "tpex:par_value", "absent", "a TPEx listing")
+            all_events = self.prices(ticker, self.today()).events
+            splits = all_events.loc[
+                (all_events["kind"] == EventKind.SPLIT.value)
+                & np.array([d >= start for d in all_events["effective_date"]], dtype=bool)
+            ]
+            ratio = float((splits["close_before"] / splits["reference_price"]).prod())
+            initial_par = float(row["par_value"].iloc[0]) * ratio
+        return share_basis(
+            ticker.code,
+            events,
+            self.dividends(ticker, as_of),
+            start=start,
+            initial_par=initial_par,
+            tolerance=per_share.share_multiplier_tolerance,
+        )
 
     # --- validation -------------------------------------------------------------------------
 
@@ -319,6 +358,19 @@ class MarketData:
                     code, _balance_totals(fin), tol.balance_sheet_tolerance
                 ),
             )
+            basis = _attempt(
+                report, "per_share.share_basis", lambda: self.share_basis(ticker, as_of)
+            )
+            if basis is not None:
+                _attempt(
+                    report,
+                    "per_share.share_count",
+                    lambda: check_share_count(
+                        code,
+                        *share_counts(fin, basis),
+                        self._tw.per_share.share_count_tolerance,
+                    ),
+                )
         revenue = _attempt(report, "revenue.fetch", lambda: self.monthly_revenue(ticker, as_of))
         if revenue is not None:
             report.add_source(

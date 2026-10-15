@@ -149,6 +149,12 @@ class KnownSuspension(_Model):
         return self.start <= day <= self.end
 
 
+class PerShareConfig(_Model):
+    default_par_value: PositiveFloat
+    share_multiplier_tolerance: Fraction
+    share_count_tolerance: Fraction
+
+
 class ListingOverride(_Model):
     ticker: Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]
     listing_date: date
@@ -213,6 +219,7 @@ class TwMarketConfig(_Model):
     filing_deadlines: FilingDeadlineConfig
     trading_calendar: TradingCalendarConfig
     known_suspensions: list[KnownSuspension]
+    per_share: PerShareConfig
     listing: ListingConfig
     benchmark: TwBenchmarkConfig
     risk_free: RiskFreeConfig

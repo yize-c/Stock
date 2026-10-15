@@ -8,7 +8,8 @@ tests whether those results held both before and after the 2020 pandemic regime 
 is used only to summarize filings and explain computed numbers. Every claim it makes must cite a
 source, and code checks that each citation is real.
 
-> **Status:** stage 3 of 11 (data layer) done. Analysis is not implemented yet.
+> **Status:** stage 4 of 11 (analysis layer: weighting, fundamentals, monthly revenue, risk)
+> done. Frameworks, stability verdicts, reports and the LLM layer are not implemented yet.
 > Full requirements: [`docs/stock-research-prompt.md`](docs/stock-research-prompt.md) (Traditional Chinese).
 
 ## Data sources and known limitations
@@ -42,6 +43,15 @@ Further limits found while building the data layer:
   the latest version is served, so `available_date` is the statutory deadline and every fetch is
   stored as an immutable snapshot. Monthly revenue uses the earlier of FinMind's storage date
   and the statutory day (the 10th).
+- **Per-share figures are restated.** FinMind's past EPS is not restated for later stock
+  dividends, splits or capital reductions. Each event's share multiplier comes from its
+  reference price (`(previous close - cash dividend) / reference price`, which equals
+  `1 + stock dividend / par` and is checked against it), and per-share figures are moved to one
+  share basis before comparison. Share counts from capital / par are checked against
+  net income / EPS, so a wrong par value fails loudly.
+- **No central-bank data.** The CBC site is blocked from the development environment, so the
+  Sharpe ratio uses the per-period rates in `markets.tw.risk_free.fallback_rates` and fails
+  until they cover the window.
 - **Trading halts for capital changes** (re-issuing shares after a reduction, split or par-value
   change) are derived from the event data and reported as expected gaps.
 
@@ -136,6 +146,25 @@ comparisons decide it:
   use the economic gap only (`ECON_ONLY`).
 - **B. Inside V1.** V1 is split at its midpoint and compared the same way, both with and without
   the 2020 crash.
+
+### Metric definitions
+
+Ratios are fractions. TTM and annual values sum four consecutive quarters; balance-sheet
+averages use only the quarter ends inside the same period, so no value reaches outside its
+window. Monthly revenue is always compared year over year, and a YoY value belongs to a window
+only if both months do (V1's first is January 2021).
+
+| Metric | Definition |
+|---|---|
+| ROE | net income attributable to parent / mean parent equity |
+| ROIC | operating income x (1 - effective tax rate) / mean (equity + borrowings) |
+| Free cash flow | operating cash flow - purchases of property, plant and equipment |
+| Interest coverage | (pre-tax income + interest expense) / interest expense |
+| Volatility | daily-return standard deviation x sqrt(252); V1/V3 also EWMA (90-day half-life) |
+| Beta | cov(stock, TAIEX total-return index) / var(index), daily returns |
+| VaR 95% | 5th percentile of daily returns, reported as a loss |
+
+Risk metrics are historical statistics over the stated dates, not probabilities.
 
 A Quandt-Andrews sup-F test also reports the most likely break date. It is shown for information
 only and does not change the verdict.

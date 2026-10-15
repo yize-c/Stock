@@ -436,8 +436,19 @@ def normalize_monthly_revenue(
 _FISCAL_RE = re.compile(r"^(\d{2,3})年(?:(第[1-4]季)|(前半年度|後半年度))?$")
 
 
-def parse_fiscal_period(label: str, ticker: str | None = None) -> tuple[date, date, PeriodType]:
-    """ROC fiscal-period labels: ``107年``, ``108年第1季``, ``112年前半年度``/``後半年度``."""
+# FinMind's label for rows that are not an earnings distribution (e.g. a rights offering).
+NO_FISCAL_PERIOD = "不適用"
+
+
+def parse_fiscal_period(
+    label: str, ticker: str | None = None
+) -> tuple[date, date, PeriodType] | None:
+    """ROC fiscal-period labels: ``107年``, ``108年第1季``, ``112年前半年度``/``後半年度``.
+
+    ``不適用`` (no fiscal period, e.g. a rights offering) returns None.
+    """
+    if str(label).strip() == NO_FISCAL_PERIOD:
+        return None
     match = _FISCAL_RE.match(str(label).strip())
     if match is None:
         raise AnomalyError(ticker, "dividend.year", label, "'NNN年', 'NNN年第Q季' or half-year")
@@ -465,8 +476,10 @@ def normalize_dividends(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
     """Declared dividends per share in NT$ (``TaiwanStockDividend``).
 
     ``stock_dividend`` is the NT$ amount distributed as shares (NT$1 = 0.1 share per share at
-    a NT$10 par). ``available_date`` is the board/shareholder announcement date; a row without
-    one raises rather than guessing.
+    a NT$10 par). Rows for cash capital increases (rights offerings) carry
+    ``rights_issue_shares``; some have no fiscal period (``不適用``), so their period columns are
+    None. ``available_date`` is the board/shareholder announcement date; a row without one
+    raises rather than guessing.
     """
     if raw.empty:
         return pd.DataFrame(
@@ -481,6 +494,8 @@ def normalize_dividends(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
                 "cash_ex_date",
                 "stock_ex_date",
                 "payment_date",
+                "rights_issue_shares",
+                "rights_issue_price",
                 "available_date",
                 "available_date_estimated",
                 "source",
@@ -495,12 +510,15 @@ def normalize_dividends(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
         "CashExDividendTradingDate",
         "StockExDividendTradingDate",
         "CashDividendPaymentDate",
+        "TotalNumberOfCashCapitalIncrease",
+        "CashIncreaseSubscriptionpRrice",
         "AnnouncementDate",
     )
     _require(raw, needed, ticker, "dividend")
     rows = []
     for rec in raw.to_dict("records"):
-        start, end, ptype = parse_fiscal_period(rec["year"], ticker)
+        period = parse_fiscal_period(rec["year"], ticker)
+        start, end, ptype = period if period is not None else (None, None, None)
         announced = _optional_date(rec["AnnouncementDate"])
         if announced is None:
             raise MissingDataError(ticker, "dividend.AnnouncementDate", rec["year"], "a date")
@@ -508,7 +526,7 @@ def normalize_dividends(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
             {
                 "ticker": ticker,
                 "fiscal_label": rec["year"],
-                "period_type": ptype.value,
+                "period_type": ptype.value if ptype is not None else None,
                 "period_start": start,
                 "period_end": end,
                 "cash_dividend": float(rec["CashEarningsDistribution"])
@@ -518,12 +536,14 @@ def normalize_dividends(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
                 "cash_ex_date": _optional_date(rec["CashExDividendTradingDate"]),
                 "stock_ex_date": _optional_date(rec["StockExDividendTradingDate"]),
                 "payment_date": _optional_date(rec["CashDividendPaymentDate"]),
+                "rights_issue_shares": float(rec["TotalNumberOfCashCapitalIncrease"]),
+                "rights_issue_price": float(rec["CashIncreaseSubscriptionpRrice"]),
                 "available_date": announced,
                 "available_date_estimated": False,
                 "source": SOURCE,
             }
         )
-    return pd.DataFrame(rows).sort_values(["period_end", "available_date"]).reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values("available_date", kind="stable").reset_index(drop=True)
 
 
 # --- fetcher --------------------------------------------------------------------------------

@@ -233,6 +233,10 @@ def test_parse_fiscal_period(label, expected) -> None:
     assert parse_fiscal_period(label) == expected
 
 
+def test_parse_fiscal_period_not_applicable() -> None:
+    assert parse_fiscal_period("不適用") is None
+
+
 def test_parse_fiscal_period_rejects_unknown() -> None:
     with pytest.raises(AnomalyError):
         parse_fiscal_period("2019")
@@ -244,8 +248,14 @@ def test_dividends() -> None:
     assert fy2018["cash_dividend"] == 8.0 and fy2018["stock_dividend"] == 0.0
     assert fy2018["available_date"] == date(2019, 6, 6)
     assert fy2018["cash_ex_date"] == date(2019, 6, 24) and fy2018["stock_ex_date"] is None
-    esun = normalize_dividends(rows("finmind_dividend_2884.json"), "2884")
-    assert esun.iloc[0]["stock_dividend"] == pytest.approx(0.10015129)
+    esun = normalize_dividends(rows("finmind_dividend_2884.json"), "2884").set_index("fiscal_label")
+    assert esun.loc["113年", "stock_dividend"] == pytest.approx(0.10015129)
+    # A rights offering (cash capital increase) has no fiscal period.
+    rights = esun.loc["不適用"]
+    assert pd.isna(rights["period_end"]) and pd.isna(rights["period_type"])
+    assert rights["rights_issue_shares"] == 800_000_000 and rights["stock_ex_date"] == date(
+        2023, 4, 7
+    )
     halves = normalize_dividends(rows("finmind_dividend_8070.json"), "8070")
     # Cash from earnings plus cash from capital surplus.
     assert halves["period_end"].tolist() == [date(2025, 6, 30), date(2025, 12, 31)]

@@ -60,6 +60,15 @@ markets:
     # listed in the data-health report; gaps outside them still raise.
     # Format: - { ticker: "1234", start: 2024-03-01, end: 2024-03-15, reason: "..." }
     known_suspensions: []
+    per_share:
+      # Par value before any split/par-value change, for TWSE stocks. TPEx stocks use the
+      # official par from TPEx. Checked against net income / EPS (share_count_tolerance).
+      default_par_value: 10.0
+      # Share multiplier from reference prices vs 1 + stock dividend / par.
+      share_multiplier_tolerance: 0.005
+      # Median ratio of implied shares (net income / EPS) to capital / par must be within
+      # this of 1; a wrong par value is off by a factor of 2 or more.
+      share_count_tolerance: 0.10
     listing:
       # Emerging-board (興櫃) trading started on this date. FinMind and Yahoo include a
       # stock's emerging-board prices before its listing; those are out of scope (no price

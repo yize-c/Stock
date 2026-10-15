@@ -285,6 +285,8 @@ def test_health_report_passes_on_consistent_data(make) -> None:
         "benchmark.completeness",
         "financials.fetch",
         "financials.balance_sheet",
+        "per_share.share_basis",
+        "per_share.share_count",
         "revenue.fetch",
         "revenue.sanity",
     ]

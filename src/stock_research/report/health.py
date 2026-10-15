@@ -19,6 +19,8 @@ _CHECK_NAMES = {
     "benchmark.completeness": "基準指數完整性",
     "financials.fetch": "財報抓取",
     "financials.balance_sheet": "資產負債表恆等式",
+    "per_share.share_basis": "股數調整（配股、分割、減資）",
+    "per_share.share_count": "股數與面額交叉驗證",
     "revenue.fetch": "月營收抓取",
     "revenue.sanity": "月營收合理性",
 }
