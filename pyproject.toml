@@ -38,6 +38,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--strict-config"]
+filterwarnings = ["error"]
 
 [tool.coverage.run]
 source = ["stock_research"]

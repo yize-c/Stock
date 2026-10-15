@@ -120,12 +120,14 @@ def check_price_completeness(
     no_price = pd.concat(
         [pd.to_numeric(prices[c], errors="coerce").isna() for c in price_cols], axis=1
     ).all(axis=1)
-    priceless_no_trade = no_price & (volume == 0) if volume is not None else no_price & False
+    priceless_no_trade = (
+        no_price & (volume == 0) if volume is not None else pd.Series(False, index=prices.index)
+    )
     for col in [*price_cols, "volume"]:
         if col not in prices:
             continue
         values = pd.to_numeric(prices[col], errors="coerce")
-        null = values.isna() & ~(priceless_no_trade if col != "volume" else False)
+        null = values.isna() if col == "volume" else values.isna() & ~priceless_no_trade
         if null.any():
             raise MissingDataError(ticker, col, _iso(dates[null]), "no null/NaN values")
         negative = values < 0
