@@ -51,6 +51,11 @@ markets:
       # Ad-hoc closures (e.g. typhoon days) not yet in the exchange notice.
       # Format: - { date: 2026-07-30, reason: "Typhoon closure" }
       manual_closures: []
+      # Quote times: unquoted 13:30 is parsed by YAML 1.1 as a base-60 integer.
+      session_close_time: "13:30"
+      # Before this time on a trading day, the latest expected close is the previous
+      # trading day (covers the session itself and the gap until official data is out).
+      daily_data_ready_time: "14:30"
     benchmark:
       # Total-return index matches returns computed from dividend-adjusted prices.
       primary: TAIEX_TOTAL_RETURN

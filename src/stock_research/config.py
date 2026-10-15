@@ -10,9 +10,10 @@ from __future__ import annotations
 import math
 import os
 import re
-from datetime import date
+from datetime import date, time
 from pathlib import Path
 from typing import Annotated, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from dotenv import load_dotenv
@@ -45,6 +46,14 @@ class GeneralConfig(_Model):
     default_market: Literal["tw", "us"]
     regime_split_date: date
     ifrs_start_year: Annotated[int, Field(ge=1900)]
+
+    @model_validator(mode="after")
+    def _check_timezone(self) -> GeneralConfig:
+        try:
+            ZoneInfo(self.timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"unknown timezone: {self.timezone!r}") from exc
+        return self
 
 
 # --- markets -----------------------------------------------------------------------------
@@ -111,6 +120,17 @@ class ManualClosure(_Model):
 class TradingCalendarConfig(_Model):
     historical_source: Literal["official_index_closes"]
     manual_closures: list[ManualClosure]
+    session_close_time: time
+    daily_data_ready_time: time
+
+    @model_validator(mode="after")
+    def _check(self) -> TradingCalendarConfig:
+        dates = [c.date for c in self.manual_closures]
+        if len(set(dates)) != len(dates):
+            raise ValueError("manual_closures contains duplicate dates")
+        if self.daily_data_ready_time < self.session_close_time:
+            raise ValueError("daily_data_ready_time must not be before session_close_time")
+        return self
 
 
 class TwBenchmarkConfig(_Model):

@@ -221,3 +221,22 @@ def test_secrets_repr_hides_values(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "super-secret-value" not in text
     assert "FINMIND_TOKEN=set" in text
     assert "ANTHROPIC_API_KEY=unset" in text
+
+
+def test_unknown_timezone_raises(raw_config, write_config) -> None:
+    raw_config["general"]["timezone"] = "Asia/Taipe"
+    with pytest.raises(ConfigError, match="unknown timezone"):
+        load_config(write_config(raw_config))
+
+
+def test_data_ready_time_not_before_close(raw_config, write_config) -> None:
+    raw_config["markets"]["tw"]["trading_calendar"]["daily_data_ready_time"] = "13:00"
+    with pytest.raises(ConfigError, match="daily_data_ready_time"):
+        load_config(write_config(raw_config))
+
+
+def test_duplicate_manual_closures_raise(raw_config, write_config) -> None:
+    closure = {"date": date(2024, 10, 31), "reason": "Typhoon"}
+    raw_config["markets"]["tw"]["trading_calendar"]["manual_closures"] = [closure, closure]
+    with pytest.raises(ConfigError, match="duplicate"):
+        load_config(write_config(raw_config))
