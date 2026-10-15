@@ -5,10 +5,13 @@ description = "Research assistant CLI for Taiwan-listed stocks: point-in-time da
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "pandas>=3.0.6",
     "pydantic>=2.14.1",
     "python-dotenv>=1.2.4",
     "pyyaml>=6.0.3",
+    "requests>=2.34.2",
     "typer>=0.27.3",
+    "yfinance>=1.7.0",
 ]
 
 [project.scripts]

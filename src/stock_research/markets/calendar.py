@@ -110,6 +110,10 @@ class TradingCalendar:
         )
 
     @property
+    def timezone(self) -> ZoneInfo:
+        return self._tz
+
+    @property
     def first_historical_day(self) -> date:
         return self._first
 
