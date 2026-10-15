@@ -36,6 +36,14 @@
 - 櫃買中心 OpenAPI 只有當日／當月資料；Yahoo 的 Close 已做分割調整（台股配股也被當成分割），成交量與官方不一致，不可當準。
 - 已知停牌放 `markets.tw.known_suspensions`，清單內缺資料視為正常，清單外仍報錯。
 
+## 第 3 階段實作時發現的資料限制（需使用者確認）
+- FinMind 免費版拿不到還原股價（`TaiwanStockPriceAdj` 需付費），改由程式用除權息、減資、分割的參考價自行還原（`data/adjustment.py`）；`as_of` 之後的事件不套用。
+- FinMind 除權息參考價與加權報酬指數都從 2003 年開始 → 股價只用 2003 年起（`data_sources.finmind.price_history_start`）。
+- FinMind／Yahoo 股價含上市前的興櫃交易，一律剔除。上市日 = 首次交易後 `TaiwanStockPER` 的第一天（只涵蓋上市櫃股票）；上櫃股票再與櫃買中心官方上櫃日比對；推不出來的放 `markets.tw.listing.overrides`。
+- 財報沒有公告日、只有最新版本 → `available_date` 用法定期限、標 `latest_only`，每次抓取存不可覆寫快照。月營收公告日用 FinMind 建檔日與法定期限較早者。
+- 減資、分割、面額變更前的停止買賣期間由事件資料推得，視為已知停牌（INFO）。
+- 未來休市日取自 FinMind `TaiwanStockTradingDate`（轉載證交所行事曆），歷史部分必須與加權指數收盤日一致。
+
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |
 |---|---|---|---|
@@ -94,6 +102,7 @@ uv sync                                  # 安裝依賴
 uv run ruff check . && uv run ruff format --check .
 uv run pytest --cov=stock_research       # 測試 + 覆蓋率
 uv run stock-research config show        # 驗證並顯示 config
+uv run stock-research validate 2330      # 資料驗證 + 資料健康報告（需 FINMIND_TOKEN）
 ```
 
 ## 程式風格

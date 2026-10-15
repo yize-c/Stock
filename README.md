@@ -8,7 +8,7 @@ tests whether those results held both before and after the 2020 pandemic regime 
 is used only to summarize filings and explain computed numbers. Every claim it makes must cite a
 source, and code checks that each citation is real.
 
-> **Status:** stage 3 of 11 (data layer) in progress. Analysis is not implemented yet.
+> **Status:** stage 3 of 11 (data layer) done. Analysis is not implemented yet.
 > Full requirements: [`docs/stock-research-prompt.md`](docs/stock-research-prompt.md) (Traditional Chinese).
 
 ## Data sources and known limitations
@@ -17,13 +17,33 @@ source, and code checks that each citation is real.
 |---|---|---|
 | TPEx OpenAPI | TPEx listings, today's quotes, ex-rights reference prices, current-month index | Implemented |
 | Yahoo Finance (`yfinance`) | Second price source for cross-checks, TAIEX closes | Implemented |
-| FinMind API | Adjusted prices, statements, monthly revenue, dividends, total-return index | Envelope only; datasets pending |
+| FinMind API | Raw prices, ex-rights/capital-reduction/split reference prices, statements, monthly revenue, dividends, TAIEX closes and total-return index, trading calendar | Implemented |
 | TWSE, MOPS | Official prices, calendar, filings | Not reachable from the cloud dev environment |
 
 Consequences: historical trading days come from TAIEX dates in FinMind/Yahoo rather than the
 official TWSE series, and TWSE-listed stocks are cross-checked between FinMind and Yahoo only.
 The data-health report states these limitations. Yahoo closes are split-adjusted (Taiwan stock
 dividends appear as splits), so periods around such events are excluded from cross-checks.
+
+Further limits found while building the data layer:
+
+- **Adjusted prices are computed, not downloaded.** FinMind's adjusted-price dataset needs a paid
+  tier. Each ex-rights/ex-dividend, capital-reduction or split event has an exchange reference
+  price; its factor is `reference_price / previous_close`, and earlier prices are multiplied by the
+  factors of later events (the exchange's 還原權值 method). Events after `as_of` are not applied.
+- **Prices start in 2003.** FinMind's reference prices and the TAIEX total-return index both
+  start in 2003, so earlier prices cannot be adjusted or benchmarked and are not used.
+- **Emerging-board (興櫃) trading is dropped.** FinMind and Yahoo include a stock's pre-listing
+  emerging-board prices. The listing date is the first day in FinMind's PER/PBR series (which
+  comes from the exchanges' files for listed stocks only) on or after the first trade. TPEx
+  listing dates are checked against TPEx's official list. Stocks whose listing date cannot be
+  derived need an entry in `markets.tw.listing.overrides`.
+- **Publication dates are estimates.** Statements have no announcement date in FinMind and only
+  the latest version is served, so `available_date` is the statutory deadline and every fetch is
+  stored as an immutable snapshot. Monthly revenue uses the earlier of FinMind's storage date
+  and the statutory day (the 10th).
+- **Trading halts for capital changes** (re-issuing shares after a reduction, split or par-value
+  change) are derived from the event data and reported as expected gaps.
 
 ## Design principles
 
@@ -58,7 +78,12 @@ cp .env.example .env   # then fill in FINMIND_TOKEN and ANTHROPIC_API_KEY
 
 ```bash
 uv run stock-research config show     # validate config.yaml and print it
+uv run stock-research validate 2330   # run every data check and print the data-health report
+uv run stock-research validate 2330 --as-of 2023-12-31
 ```
+
+`validate` needs `FINMIND_TOKEN`. It exits with code 1 when any check fails; analysis must not
+continue on that data.
 
 Planned commands (later stages):
 
@@ -69,7 +94,6 @@ stock-research analyze 2330 --window post_2020
 stock-research analyze 2330 --as-of 2023-12-31
 stock-research analyze 2330 --only-unstable
 stock-research breakpoints 2330
-stock-research validate 2330
 stock-research validation run known-cases
 stock-research validation run point-in-time
 stock-research validation export-expert-forms

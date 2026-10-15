@@ -149,6 +149,24 @@ class KnownSuspension(_Model):
         return self.start <= day <= self.end
 
 
+class ListingOverride(_Model):
+    ticker: Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]
+    listing_date: date
+    source: str = Field(min_length=1)
+
+
+class ListingConfig(_Model):
+    emerging_board_start: date
+    overrides: list[ListingOverride]
+
+    @model_validator(mode="after")
+    def _check_unique(self) -> ListingConfig:
+        tickers = [o.ticker for o in self.overrides]
+        if len(set(tickers)) != len(tickers):
+            raise ValueError("listing.overrides contains duplicate tickers")
+        return self
+
+
 class TwBenchmarkConfig(_Model):
     primary: str
     fallback_ticker: str
@@ -195,6 +213,7 @@ class TwMarketConfig(_Model):
     filing_deadlines: FilingDeadlineConfig
     trading_calendar: TradingCalendarConfig
     known_suspensions: list[KnownSuspension]
+    listing: ListingConfig
     benchmark: TwBenchmarkConfig
     risk_free: RiskFreeConfig
     industry_classification: str
@@ -419,6 +438,15 @@ class ScoringConfig(_Model):
 
 class FinMindConfig(_Model):
     max_requests_per_hour: PositiveInt
+    history_start: date
+    price_history_start: date
+    valuation_coverage_start: date
+
+    @model_validator(mode="after")
+    def _check_order(self) -> FinMindConfig:
+        if not self.history_start <= self.price_history_start:
+            raise ValueError("price_history_start must not be before history_start")
+        return self
 
 
 class OfficialSourceConfig(_Model):

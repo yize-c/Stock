@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -48,3 +49,29 @@ class FakeClock:
     def sleep(self, seconds: float) -> None:
         self.slept.append(seconds)
         self.now += seconds
+
+
+def envelope(rows: list[dict[str, Any]]) -> str:
+    return json.dumps({"msg": "success", "status": 200, "data": rows}, ensure_ascii=False)
+
+
+@dataclass
+class RoutingSession:
+    """Answers FinMind-style requests by ``(dataset, data_id)`` and other URLs by URL.
+
+    Values are fixture file names or lists of rows (wrapped in a FinMind envelope). An
+    unrouted request fails the test, so nothing reaches a real API.
+    """
+
+    routes: dict[Any, str | list[dict[str, Any]]]
+    calls: list[dict[str, Any]] = field(default_factory=list)
+
+    def get(self, url, *, params=None, headers=None, timeout=None):
+        params = dict(params or {})
+        self.calls.append({"url": url, "params": params})
+        key: Any = (params["dataset"], params.get("data_id")) if "dataset" in params else url
+        if key not in self.routes:
+            raise AssertionError(f"unexpected request: {key}")
+        value = self.routes[key]
+        text = fixture_text(value) if isinstance(value, str) else envelope(value)
+        return FakeResponse(200, text)

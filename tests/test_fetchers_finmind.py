@@ -62,3 +62,14 @@ def test_empty_data_raises() -> None:
 def test_bad_envelopes(body) -> None:
     with pytest.raises(SourceUnavailableError):
         check_envelope(body)
+
+
+def test_allow_empty_returns_empty_frame() -> None:
+    c, _ = finmind(ok([]))
+    assert c.dataset("TaiwanStockSplitPrice", data_id="2330", allow_empty=True).empty
+
+
+def test_paid_tier_dataset_raises_with_message() -> None:
+    c, _ = finmind(FakeResponse(200, fixture_text("finmind_400_level.json")))
+    with pytest.raises(SourceUnavailableError, match="level is register"):
+        c.dataset("TaiwanStockPriceAdj", data_id="2330")

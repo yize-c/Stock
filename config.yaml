@@ -60,6 +60,15 @@ markets:
     # listed in the data-health report; gaps outside them still raise.
     # Format: - { ticker: "1234", start: 2024-03-01, end: 2024-03-15, reason: "..." }
     known_suspensions: []
+    listing:
+      # Emerging-board (興櫃) trading started on this date. FinMind and Yahoo include a
+      # stock's emerging-board prices before its listing; those are out of scope (no price
+      # limits, not a listed common share) and are dropped.
+      emerging_board_start: 2002-01-02
+      # Listing dates that cannot be derived from the data (a stock that first traded after
+      # emerging_board_start and was listed before valuation_coverage_start).
+      # Format: - { ticker: "1234", listing_date: 2004-03-15, source: "TWSE listing notice" }
+      overrides: []
     benchmark:
       # Total-return index matches returns computed from dividend-adjusted prices.
       primary: TAIEX_TOTAL_RETURN
@@ -208,6 +217,16 @@ data_sources:
   finmind:
     # Free tier allows a few hundred requests per hour; stay below it.
     max_requests_per_hour: 300
+    # First date requested for daily series; each series starts where FinMind's data does
+    # (stock prices from 1994, TAIEX closes and the trading calendar from 1999-01-05).
+    history_start: 1990-01-01
+    # Prices are used from this date on. FinMind's ex-rights/ex-dividend reference prices
+    # (TaiwanStockDividendResult) and the TAIEX total-return index both start in 2003, so
+    # earlier prices cannot be adjusted for dividends and have no matching benchmark.
+    price_history_start: 2003-01-01
+    # First day of TaiwanStockPER, which comes from the exchanges' daily valuation files.
+    # Those cover listed stocks only, so a later first date is the listing date.
+    valuation_coverage_start: 2005-09-02
   official:
     # Minimum delay between requests to TWSE / TPEx / MOPS endpoints.
     min_request_interval_seconds: 3.0
