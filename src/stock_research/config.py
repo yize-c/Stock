@@ -484,6 +484,9 @@ class ScoringConfig(_Model):
 
 class FinMindConfig(_Model):
     max_requests_per_hour: PositiveInt
+    # Batch export only: on an exhausted quota (HTTP 402) wait this long and retry.
+    quota_retries: Annotated[int, Field(ge=0)]
+    quota_wait_minutes: PositiveFloat
     history_start: date
     price_history_start: date
     valuation_coverage_start: date

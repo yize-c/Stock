@@ -101,6 +101,8 @@
 - 形式：PWA（Safari 加到主畫面），不是原生 iOS App；`web/` 為純 HTML/JS，不需建置，不計算任何數字。
 - 範圍：`app.watchlist` 約 50 支；每日由 GitHub Actions（台北 04:17，週一至週五）跑 `stock-research export`，部署到 GitHub Pages（repo 需公開，`FINMIND_TOKEN` 放 GitHub Secret）。
 - 每日匯出不抓同業（`app.with_peers: false`），需產業中位數的框架項目顯示為不可用。FinMind 請求上限調為每小時 550（免費版 600）。
+- 第一次全跑（50 支）：12 支需上市日 override（2002–2003 年才有首筆交易的金控與大型股）、6 支需股價起點 override（FinMind 缺 2011 年前的減資）；台新金（特別股）與台灣大（子公司持有庫藏股）的股數交叉驗證不一致，屬模型限制，換成彰銀、國巨。
+- 每日匯出遇到 FinMind 額度用完（402）會等待後重試（`quota_retries`、`quota_wait_minutes`），互動指令不等待。
 - 資料檢查未通過的股票照樣列出並顯示失敗項目，不用舊資料替代；資料超過 `app.stale_after_hours` 未更新時 App 顯示警告。
 
 ## 三個版本（TimeWindow）

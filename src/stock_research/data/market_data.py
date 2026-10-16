@@ -567,17 +567,22 @@ class MarketData:
     # --- construction -----------------------------------------------------------------------
 
     @classmethod
-    def open(cls, config: AppConfig, secrets: Secrets, cache: Cache) -> MarketData:
+    def open(
+        cls, config: AppConfig, secrets: Secrets, cache: Cache, *, wait_on_quota: bool = False
+    ) -> MarketData:
         sources = config.data_sources
+        finmind = sources.finmind
         session = requests.Session()
         max_age = timedelta(hours=sources.cache_max_age_hours)
         finmind_http = JsonClient(
             "finmind",
             session,
-            RateLimiter(max_per_hour=sources.finmind.max_requests_per_hour),
+            RateLimiter(max_per_hour=finmind.max_requests_per_hour),
             cache,
             timeout_seconds=sources.request_timeout_seconds,
             headers=auth_headers(secrets.get(Secrets.FINMIND_TOKEN)),
+            quota_retries=finmind.quota_retries if wait_on_quota else 0,
+            quota_wait_seconds=finmind.quota_wait_minutes * 60,
         )
         tpex_http = JsonClient(
             "tpex",

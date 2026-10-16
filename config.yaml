@@ -117,6 +117,72 @@ markets:
             Wistron IPO on TWSE, Aug 2003 (public record); FinMind's first trade is
             2003-08-19 with no earlier emerging-board trades, and TaiwanStockPER starts only
             at its 2005-09-02 coverage start.
+        - ticker: "2885"
+          listing_date: 2002-02-04
+          source: >-
+            Yuanta FHC (formerly Fuhwa FHC) listed on formation by share swap; FinMind's first trade is 2002-02-04 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "2886"
+          listing_date: 2002-02-04
+          source: >-
+            Mega FHC (formerly Chiao Tung FHC) listed on formation by share swap; FinMind's first trade is 2002-02-04 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "2887"
+          listing_date: 2002-02-18
+          source: >-
+            Taishin FHC listed on formation by share swap; FinMind's first trade is 2002-02-18 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "2890"
+          listing_date: 2002-05-09
+          source: >-
+            SinoPac FHC listed on formation by share swap; FinMind's first trade is 2002-05-09 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "2891"
+          listing_date: 2002-05-17
+          source: >-
+            CTBC FHC (formerly Chinatrust FHC) listed on formation by share swap; FinMind's first trade is 2002-05-17 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "2892"
+          listing_date: 2003-01-02
+          source: >-
+            First FHC listed on formation by share swap; FinMind's first trade is 2003-01-02 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "3008"
+          listing_date: 2002-03-11
+          source: >-
+            Largan listed on TWSE; FinMind's first trade is 2002-03-11 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "3017"
+          listing_date: 2002-09-27
+          source: >-
+            Asia Vital Components listed on TWSE; FinMind's first trade is 2002-09-27 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "3034"
+          listing_date: 2002-08-26
+          source: >-
+            Novatek listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "3037"
+          listing_date: 2002-08-26
+          source: >-
+            Unimicron listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "3045"
+          listing_date: 2002-08-26
+          source: >-
+            Taiwan Mobile listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "4904"
+          listing_date: 2003-08-01
+          source: >-
+            Far EasTone listed on TWSE; FinMind's first trade is 2003-08-01 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "6505"
+          listing_date: 2003-12-26
+          source: >-
+            Formosa Petrochemical listed on TWSE; FinMind's first trade is 2003-12-26 and
+            TaiwanStockPER starts only at its 2005-09-02 coverage start. A long-listed large
+            cap, not emerging-board trading.
     # Prices before a capital change whose reference price is missing from FinMind cannot be
     # adjusted; such a stock's prices start on the day trading resumed after the last one.
     # Format: - { ticker: "1234", start: 2009-03-20, reason: "..." }
@@ -128,6 +194,32 @@ markets:
           (2009-03-03 to 2009-03-19) and 2010 (2010-01-21 to 2010-02-05) are missing from
           TaiwanStockCapitalReductionReferencePrice (it starts with the 2011 reduction);
           without reference prices the resumption days show false jumps (+13.9%, +19.3%).
+      - ticker: "2303"
+        start: 2007-10-09
+        reason: >-
+          Capital change: halted from 2007-09-20, resumed 2007-10-09 at +22.1% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
+      - ticker: "2357"
+        start: 2010-06-24
+        reason: >-
+          Pegatron spin-off: halted from 2010-05-18, resumed 2010-06-24 at +377% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
+      - ticker: "2379"
+        start: 2007-06-25
+        reason: >-
+          Capital change: halted from 2007-06-12, resumed 2007-06-25 at +102% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
+      - ticker: "2408"
+        start: 2009-08-26
+        reason: >-
+          Capital change: halted from 2009-08-13, resumed 2009-08-26 at +177% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
+      - ticker: "5347"
+        start: 2007-04-16
+        reason: >-
+          A capital change (halted from 2004-09-29, +78.9% on 2004-10-18) and unexplained limit breaches on 2005-07-08 (-8.3%) and 2007-04-14 (+9.2%); prices before the last breach are excluded. TaiwanStockCapitalReductionReferencePrice starts in 2011.
+      - ticker: "4904"
+        start: 2008-03-28
+        reason: >-
+          Capital change: halted from 2008-03-11, resumed 2008-03-28 at +24.4%, and an
+          unexplained -13.2% on 2004-08-12. TaiwanStockCapitalReductionReferencePrice starts
+          in 2011.
     benchmark:
       # Total-return index matches returns computed from dividend-adjusted prices.
       primary: TAIEX_TOTAL_RETURN
@@ -280,6 +372,10 @@ data_sources:
   finmind:
     # Free tier allows 600 requests per hour; stay below it.
     max_requests_per_hour: 550
+    # The daily export waits out an exhausted quota (status 402) instead of failing the
+    # remaining stocks; interactive commands never wait.
+    quota_retries: 2
+    quota_wait_minutes: 20
     # First date requested for daily series; each series starts where FinMind's data does
     # (stock prices from 1994, TAIEX closes and the trading calendar from 1999-01-05).
     history_start: 1990-01-01
@@ -413,8 +509,8 @@ app:
   watchlist: [
     "2330", "2317", "2454", "2308", "2382", "2303", "3711", "2357", "3231", "2376",
     "3008", "2379", "3034", "2408", "3037", "2345", "6669", "3017", "2395", "6488",
-    "5347", "2412", "3045", "4904", "2881", "2882", "2891", "2886", "2892", "5880",
-    "2880", "2885", "2887", "2890", "1301", "1303", "1326", "6505", "2002", "1101",
+    "5347", "2412", "2327", "4904", "2881", "2882", "2891", "2886", "2892", "5880",
+    "2880", "2885", "2801", "2890", "1301", "1303", "1326", "6505", "2002", "1101",
     "1216", "2912", "2207", "9910", "9921", "9917", "2603", "2609", "2615", "1476",
   ]
   # Industry medians need every peer's statements: too many requests for a daily run on

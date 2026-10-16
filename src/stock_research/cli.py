@@ -57,10 +57,10 @@ def _load(config: Path) -> AppConfig:
         raise typer.Exit(code=1) from exc
 
 
-def open_market_data(cfg: AppConfig) -> MarketData:
+def open_market_data(cfg: AppConfig, *, wait_on_quota: bool = False) -> MarketData:
     """Real data access: FinMind, Yahoo and TPEx behind the local cache."""
     cache = Cache(cfg.data_sources.cache_dir / "cache.sqlite")
-    return MarketData.open(cfg, Secrets(), cache)
+    return MarketData.open(cfg, Secrets(), cache, wait_on_quota=wait_on_quota)
 
 
 @config_app.command("show")
@@ -74,9 +74,9 @@ def config_show(config: Path = ConfigOption) -> None:
         typer.echo(f"  {name}: {'set' if secrets.is_set(name) else 'unset'}")
 
 
-def _open(cfg: AppConfig) -> MarketData:
+def _open(cfg: AppConfig, *, batch: bool = False) -> MarketData:
     try:
-        return open_market_data(cfg)
+        return open_market_data(cfg, wait_on_quota=True) if batch else open_market_data(cfg)
     except MissingSecretError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
@@ -212,7 +212,7 @@ def export(
     from stock_research.export.site import export_site
 
     cfg = _load(config)
-    market_data = _open(cfg)
+    market_data = _open(cfg, batch=True)
     summary = export_site(
         market_data, cfg, out, codes=[c.strip() for c in codes] if codes else None, progress=_echo
     )

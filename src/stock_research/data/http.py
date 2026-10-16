@@ -105,8 +105,16 @@ class JsonClient:
         *,
         timeout_seconds: float = 60.0,
         headers: Mapping[str, str] | None = None,
+        quota_retries: int = 0,
+        quota_wait_seconds: float = 0.0,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.source = source
+        # Batch runs may wait out an exhausted quota (e.g. FinMind's hourly limit) instead of
+        # failing every remaining request; interactive runs keep the default of no waiting.
+        self._quota_retries = quota_retries
+        self._quota_wait = quota_wait_seconds
+        self._sleep = sleep
         self._session = session
         self._limiter = limiter
         self._cache = cache
@@ -114,6 +122,24 @@ class JsonClient:
         self._headers = {"User-Agent": USER_AGENT, "Accept": "application/json", **(headers or {})}
 
     def get_json(
+        self,
+        url: str,
+        params: Mapping[str, Any] | None = None,
+        *,
+        max_age: timedelta | None,
+        check: Callable[[Any], None] | None = None,
+    ) -> JsonResult:
+        """``_get_json`` plus waiting out an exhausted quota up to ``quota_retries`` times."""
+        for attempt in range(self._quota_retries + 1):
+            try:
+                return self._get_json(url, params, max_age=max_age, check=check)
+            except SourceRateLimitedError:
+                if attempt == self._quota_retries:
+                    raise
+                self._sleep(self._quota_wait)
+        raise AssertionError("unreachable")
+
+    def _get_json(
         self,
         url: str,
         params: Mapping[str, Any] | None = None,

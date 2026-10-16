@@ -79,6 +79,38 @@ def test_check_runs_on_error_status_and_failed_responses_are_not_cached() -> Non
         assert cache.get_raw("src", URL, {}, max_age=None) is None
 
 
+def _quota_check(body):
+    if body.get("status") == 402:
+        raise SourceRateLimitedError("src", URL, body["msg"], "quota")
+
+
+def test_batch_client_waits_out_an_exhausted_quota() -> None:
+    limited = FakeResponse(402, fixture_text("finmind_402_limit.json"))
+    ok = FakeResponse(200, '{"status": 200, "data": []}')
+    slept: list[float] = []
+    session = FakeSession([limited, limited, ok])
+    c = JsonClient(
+        "src", session, RateLimiter(), quota_retries=2, quota_wait_seconds=1200, sleep=slept.append
+    )
+    assert c.get_json(URL, max_age=None, check=_quota_check).data == {"status": 200, "data": []}
+    assert slept == [1200, 1200] and len(session.calls) == 3
+
+
+def test_quota_retries_run_out_and_default_never_waits() -> None:
+    limited = FakeResponse(402, fixture_text("finmind_402_limit.json"))
+    slept: list[float] = []
+    c = JsonClient(
+        "src", FakeSession([limited] * 2), RateLimiter(), quota_retries=1, quota_wait_seconds=5,
+        sleep=slept.append,
+    )  # fmt: skip
+    with pytest.raises(SourceRateLimitedError):
+        c.get_json(URL, max_age=None, check=_quota_check)
+    assert slept == [5]
+    plain, _ = client([limited])
+    with pytest.raises(SourceRateLimitedError):
+        plain.get_json(URL, max_age=None, check=_quota_check)
+
+
 def test_auth_headers_sent_but_not_in_cache_key() -> None:
     with Cache(":memory:") as cache:
         session = FakeSession([FakeResponse(200, "[1]")])

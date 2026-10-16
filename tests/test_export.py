@@ -85,7 +85,7 @@ def test_clean_makes_json_safe() -> None:
 
 def test_cli_export(config, tmp_path, monkeypatch, write_config, raw_config) -> None:
     md, _ = build_market_data(config)
-    monkeypatch.setattr(cli, "open_market_data", lambda cfg: md)
+    monkeypatch.setattr(cli, "open_market_data", lambda cfg, **_: md)
     raw_config["markets"]["tw"]["listing"]["overrides"] = [TSMC_LISTING]
     raw_config["app"]["watchlist"] = ["2330"]
     path = str(write_config(raw_config))
