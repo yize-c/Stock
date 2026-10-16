@@ -189,6 +189,15 @@ class ListingOverride(_Model):
     source: str = Field(min_length=1)
 
 
+class PriceHistoryOverride(_Model):
+    """A later price start for one stock, when an earlier capital change lacks the reference
+    price needed to adjust its prices (FinMind's capital-reduction data starts in 2011)."""
+
+    ticker: Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]
+    start: date
+    reason: str = Field(min_length=1)
+
+
 class ListingConfig(_Model):
     emerging_board_start: date
     overrides: list[ListingOverride]
@@ -250,6 +259,7 @@ class TwMarketConfig(_Model):
     per_share: PerShareConfig
     industries: IndustryConfig
     listing: ListingConfig
+    price_history_overrides: list[PriceHistoryOverride]
     benchmark: TwBenchmarkConfig
     risk_free: RiskFreeConfig
     industry_classification: str

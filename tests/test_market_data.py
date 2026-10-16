@@ -314,6 +314,37 @@ def test_health_report_records_failures_and_keeps_checking(make) -> None:
     assert result["revenue.sanity"].passed  # later checks still ran
 
 
+def test_price_history_override_moves_the_start(make) -> None:
+    def tweak(raw):
+        raw["markets"]["tw"]["price_history_overrides"] = [
+            {"ticker": "2330", "start": "2026-09-01", "reason": "missing capital change"}
+        ]
+
+    md, _ = make(overrides=[TSMC_LISTING], tweak=tweak)
+    prices = md.prices(TSMC, AS_OF)
+    assert prices.raw["date"].min() == date(2026, 9, 1)
+    assert prices.adjusted["date"].min() == date(2026, 9, 1)
+
+
+def test_cross_source_skips_every_day_before_a_yahoo_split(make) -> None:
+    """Yahoo adjusts closes before a stock dividend; those days must not be compared, and
+    older days must not refill the lookback window (9917, 2026-08-31 stock dividend)."""
+    routes = base_routes()
+    split_day = date(2026, 10, 1)
+    plain = yahoo_like("2330", routes)
+
+    def adjusted(symbol, start, end_exclusive):
+        frame = plain(symbol, start, end_exclusive)
+        before = frame.index.date < split_day
+        frame.loc[before, "Close"] = frame.loc[before, "Close"] / 1.05
+        frame.loc[frame.index.date == split_day, "Stock Splits"] = 1.05
+        return frame
+
+    md, _ = make(routes, overrides=[TSMC_LISTING], yahoo=adjusted)
+    result = {c.name: c for c in md.health_report("2330", AS_OF).checks}
+    assert result["prices.cross_source"].passed, result["prices.cross_source"].detail
+
+
 def test_health_report_stale_data(make) -> None:
     routes = base_routes()
     routes[("TaiwanStockPrice", "2330")] = data("finmind_price_2330_recent.json")[:-1]

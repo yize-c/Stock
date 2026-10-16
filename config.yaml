@@ -110,7 +110,24 @@ markets:
       # Listing dates that cannot be derived from the data (a stock that first traded after
       # emerging_board_start and was listed before valuation_coverage_start).
       # Format: - { ticker: "1234", listing_date: 2004-03-15, source: "TWSE listing notice" }
-      overrides: []
+      overrides:
+        - ticker: "3231"
+          listing_date: 2003-08-19
+          source: >-
+            Wistron IPO on TWSE, Aug 2003 (public record); FinMind's first trade is
+            2003-08-19 with no earlier emerging-board trades, and TaiwanStockPER starts only
+            at its 2005-09-02 coverage start.
+    # Prices before a capital change whose reference price is missing from FinMind cannot be
+    # adjusted; such a stock's prices start on the day trading resumed after the last one.
+    # Format: - { ticker: "1234", start: 2009-03-20, reason: "..." }
+    price_history_overrides:
+      - ticker: "2412"
+        start: 2010-02-08
+        reason: >-
+          Capital changes with trading halts in 2008 (2007-12-21 to 2008-01-08), 2009
+          (2009-03-03 to 2009-03-19) and 2010 (2010-01-21 to 2010-02-05) are missing from
+          TaiwanStockCapitalReductionReferencePrice (it starts with the 2011 reduction);
+          without reference prices the resumption days show false jumps (+13.9%, +19.3%).
     benchmark:
       # Total-return index matches returns computed from dividend-adjusted prices.
       primary: TAIEX_TOTAL_RETURN

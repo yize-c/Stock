@@ -307,6 +307,9 @@ class MarketData:
         start = self._config.data_sources.finmind.price_history_start
         if listing is not None:
             start = max(start, listing)
+        for override in self._tw.price_history_overrides:
+            if override.ticker == ticker.code:
+                start = max(start, override.start)
         raw = raw.loc[pd.to_datetime(raw["date"]) >= pd.Timestamp(start)]
         return adjust_prices(ticker.code, raw.reset_index(drop=True), events, as_of)
 
@@ -536,7 +539,9 @@ class MarketData:
             d for d, s in zip(yahoo["date"], yahoo["splits"], strict=True) if s not in (0, 1)
         ]
         cutoff = max([d for d in changes if d <= recent[-1]], default=None)
-        excluded = [d for d in recent if cutoff is not None and d < cutoff]
+        # Every day before the last share-basis change, not only those in the window:
+        # otherwise older (pre-change) days would refill the lookback.
+        excluded = [d for d in raw["date"] if cutoff is not None and d < cutoff]
         finmind = raw.set_index("date")["close"]
         check_cross_source(
             ticker.code,

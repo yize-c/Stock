@@ -93,6 +93,8 @@
 - walk-forward 的預測 = 判定為 UNSTABLE（STABLE、REGIME_SHIFT 表示 V1 能代表現在）；最大回撤的 V1 參考值 = V1 內 H 個月區塊回撤的中位數。
 - 保留期防護：`preregistration.md` 已 commit、無修改、`Status: FINAL`、`Config SHA-256` 與已 commit 的 config 一致，且 `results/holdout_lock.json` 不存在；開始時寫入鎖檔。
 - 已知案例由 Claude 依公開資訊標註（使用者授權），待使用者或專家檢視；walk-forward 樣本是固定的 24 支股票，有倖存者偏差，需在結果中註明。
+- 第 10 階段跑真實資料時發現：跨來源比對原本只排除比對窗口內、配股前的日期，更早的日期會被補進窗口（9917 失敗）→ 改為排除最後一次股數基準變動前的所有日期。
+- FinMind 減資參考價從 2011 年開始，更早的減資（例：中華電 2008–2010）無法還原 → `markets.tw.price_history_overrides` 讓該股股價從最後一次缺資料的停牌後開始，並寫明原因。
 - `analyze` 在 as_of 為今天時寫入 `validation/forward_log/`（`--no-forward-log` 可關閉）。
 
 ## 三個版本（TimeWindow）
