@@ -554,9 +554,15 @@ class LlmConfig(_Model):
     number_tolerance: Fraction
 
 
+class ReferenceLink(_Model):
+    name: str = Field(min_length=1)
+    url: str = Field(pattern=r"^https://")
+
+
 class ReportConfig(_Model):
     language: Literal["zh-TW"]
     output_dir: Path
+    reference_links: list[ReferenceLink]
 
 
 # --- root ---------------------------------------------------------------------------------

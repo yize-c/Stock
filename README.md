@@ -8,8 +8,8 @@ tests whether those results held both before and after the 2020 pandemic regime 
 is used only to summarize filings and explain computed numbers. Every claim it makes must cite a
 source, and code checks that each citation is real.
 
-> **Status:** stage 7 of 11 (LLM layer with citation and number verification) done. Reports and
-> the CLI `analyze` command are not implemented yet.
+> **Status:** stage 8 of 11 (Markdown reports and the `analyze` / `breakpoints` commands) done.
+> Claude Code settings (stage 9) and the validation tools (stage 10) are not implemented yet.
 > Full requirements: [`docs/stock-research-prompt.md`](docs/stock-research-prompt.md) (Traditional Chinese).
 
 ## Data sources and known limitations
@@ -95,15 +95,25 @@ uv run stock-research validate 2330 --as-of 2023-12-31
 `validate` needs `FINMIND_TOKEN`. It exits with code 1 when any check fails; analysis must not
 continue on that data.
 
-Planned commands (later stages):
+```bash
+uv run stock-research analyze 2330                       # full report -> reports/2330_<as_of>.md
+uv run stock-research analyze 2330 2454 2317 --compare   # one report each + a comparison table
+uv run stock-research analyze 2330 --window post_2020    # one window only
+uv run stock-research analyze 2330 --as-of 2023-12-31    # point-in-time run
+uv run stock-research analyze 2330 --only-unstable       # list only UNSTABLE / REGIME_SHIFT items
+uv run stock-research analyze 2330 --no-peers            # skip industry medians (faster)
+uv run stock-research analyze 2330 --llm                 # add the LLM sections (needs ANTHROPIC_API_KEY)
+uv run stock-research breakpoints 2330                   # structural-break scan (information only)
+```
+
+`analyze` runs the data checks first; when any check fails it prints the data-health report and
+exits with code 1 without writing an analysis. Reports are in Traditional Chinese and end with
+the disclaimer. Sharpe ratios fail loudly until `markets.tw.risk_free.fallback_rates` covers the
+window.
+
+Planned commands (stage 10):
 
 ```bash
-stock-research analyze 2330
-stock-research analyze 2330 2454 2317 --compare
-stock-research analyze 2330 --window post_2020
-stock-research analyze 2330 --as-of 2023-12-31
-stock-research analyze 2330 --only-unstable
-stock-research breakpoints 2330
 stock-research validation run known-cases
 stock-research validation run point-in-time
 stock-research validation export-expert-forms

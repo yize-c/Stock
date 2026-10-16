@@ -30,7 +30,9 @@ def evaluate(inputs: FrameworkInputs) -> FrameworkResult:
         _roe(inputs),
         _debt(inputs),
         _fcf_years(inputs),
-        info("moat", "護城河（LLM 判斷，需附引用）", None, "第 7 階段（LLM 層）實作"),
+        info(
+            "moat", "護城河（LLM 判斷，需附引用）", None, "見第 7 節年報質化分析（需 --llm 與文件）"
+        ),
         _valuation_percentiles(inputs),
     )
     return FrameworkResult(NAME, inputs.window.name, items)

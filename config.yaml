@@ -289,10 +289,10 @@ risk:
   annualization_days: 252
   # Shown next to risk metrics so readers know whether a window contains them.
   major_events:
-    - { name: "2008 global financial crisis", start: 2008-09-01, end: 2009-03-31 }
-    - { name: "2015 price-limit widening to 10%", start: 2015-06-01, end: 2015-06-01 }
-    - { name: "2020 pandemic crash", start: 2020-02-20, end: 2020-06-30 }
-    - { name: "2022 rate hikes and TAIEX correction", start: 2022-01-01, end: 2022-12-31 }
+    - { name: "2008 全球金融海嘯", start: 2008-09-01, end: 2009-03-31 }
+    - { name: "2015 漲跌幅放寬至 10%", start: 2015-06-01, end: 2015-06-01 }
+    - { name: "2020 疫情崩跌", start: 2020-02-20, end: 2020-06-30 }
+    - { name: "2022 升息與台股修正", start: 2022-01-01, end: 2022-12-31 }
 
 technicals:
   sma_windows: [20, 60, 240]
@@ -326,3 +326,10 @@ llm:
 report:
   language: zh-TW
   output_dir: reports
+  # Pages for checking the numbers by hand. Links only: these sites are never scraped.
+  # Placeholders: {code} (e.g. 2330) and {yahoo_symbol} (e.g. 2330.TW / 6488.TWO).
+  reference_links:
+    - { name: "Goodinfo!", url: "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={code}" }
+    - { name: "Yahoo 奇摩股市", url: "https://tw.stock.yahoo.com/quote/{yahoo_symbol}" }
+    - { name: "鉅亨網", url: "https://www.cnyes.com/twstock/{code}" }
+    - { name: "公開資訊觀測站（輸入代號查詢）", url: "https://mops.twse.com.tw/mops/" }

@@ -124,5 +124,6 @@ def _preferred_industry(inputs: FrameworkInputs):
         "preferred_industry",
         "是否屬於偏好產業（金融、民生必需品、電信）",
         "是" if hits else "否",
-        f"{inputs.industry}" + (f"（{', '.join(hits)}）" if hits else ""),
+        f"{'是' if hits else '否'}（{inputs.industry}"
+        + (f"，{', '.join(hits)}）" if hits else "）"),
     )

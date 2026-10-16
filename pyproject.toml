@@ -40,8 +40,9 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
-# Prompt text is Chinese prose; splitting sentences across lines would hurt readability.
+# Prompt and report text is Chinese prose; splitting sentences hurts readability.
 "src/stock_research/llm/prompts.py" = ["E501"]
+"src/stock_research/report/*.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -24,7 +24,12 @@ def evaluate(inputs: FrameworkInputs) -> FrameworkResult:
     items = (
         _gross_margin_vs_industry(inputs),
         _roic(inputs),
-        info("inversion", "反向思考：可能出錯的地方（LLM，需附引用）", None, "第 7 階段實作"),
+        info(
+            "inversion",
+            "反向思考：可能出錯的地方（LLM，需附引用）",
+            None,
+            "見第 7 節年報質化分析（需 --llm 與文件）",
+        ),
     )
     return FrameworkResult(NAME, inputs.window.name, items)
 

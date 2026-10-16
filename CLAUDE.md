@@ -72,6 +72,12 @@
 - 引用驗證：NFKC、去空白、標點統一、不做繁簡轉換；數字驗證支援中文數字與兆／億／萬、百分之、%；年／月／季、V1／Q4 這類標籤不當數字。
 - 目前環境沒有 ANTHROPIC_API_KEY，LLM 層只用 mock 測試，尚未實際呼叫。
 
+## 第 8 階段的做法（使用者授權自行判斷）
+- `analyze` 先跑資料檢查，未通過就輸出資料健康報告並以 exit 1 結束，不產生分析。報告寫入 `reports/<代號>_<as_of>.md`。
+- 報告欄位順序固定 V1、V3、V2（V2 只當參考）；`--compare` 另產生多檔比較表。
+- 技術指標只描述（高於／低於均線、RSI、MACD），並註明實證效果有爭議，不輸出訊號。
+- 外部參考連結（Goodinfo、Yahoo 奇摩股市、鉅亨網、MOPS）放 `report.reference_links`；重大事件名稱改中文。
+
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |
 |---|---|---|---|
@@ -131,6 +137,8 @@ uv run ruff check . && uv run ruff format --check .
 uv run pytest --cov=stock_research       # 測試 + 覆蓋率
 uv run stock-research config show        # 驗證並顯示 config
 uv run stock-research validate 2330      # 資料驗證 + 資料健康報告（需 FINMIND_TOKEN）
+uv run stock-research analyze 2330       # 完整分析報告 → reports/2330_<as_of>.md
+uv run stock-research breakpoints 2330   # 結構斷點掃描（僅供參考）
 ```
 
 ## 程式風格

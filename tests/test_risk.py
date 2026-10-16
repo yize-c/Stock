@@ -54,7 +54,7 @@ def test_returns_volatility_beta_var(raw_config, write_config) -> None:
     assert m.beta == pytest.approx(2.0)
     assert m.var == pytest.approx(-np.quantile(returns, 0.05))
     assert m.ewma_volatility is not None
-    assert m.events_covered == ("2020 pandemic crash",)
+    assert m.events_covered == ("2020 疫情崩跌",)
     assert m.label == HISTORICAL_LABEL.format(start="2020-01-02", end="2021-12-31")
     assert "不代表未來機率" in m.label
 

@@ -17,7 +17,7 @@ import pandas as pd
 from stock_research.analysis import breakpoints as bp
 from stock_research.analysis.frameworks import run_all
 from stock_research.analysis.frameworks.base import FrameworkResult, Outcome
-from stock_research.analysis.fundamentals import ttm_table
+from stock_research.analysis.fundamentals import Valuation, ttm_table
 from stock_research.analysis.inputs import StockData, inputs_for
 from stock_research.analysis.results import InsufficientHistory
 from stock_research.analysis.risk import daily_returns
@@ -208,6 +208,8 @@ class StabilityReport:
     framework_results: dict[WindowName, list[FrameworkResult]]
     composites: dict[WindowName, CompositeScore]
     breakpoints: list[bp.BreakResult | InsufficientHistory]
+    valuations: dict[WindowName, Valuation | None]
+    valuation_problems: dict[WindowName, str | None]
 
 
 def stability_report(data: StockData, config: AppConfig) -> StabilityReport:
@@ -268,6 +270,8 @@ def stability_report(data: StockData, config: AppConfig) -> StabilityReport:
         framework_results=results,
         composites=composites,
         breakpoints=_breakpoints(plain[WindowName.FULL], config),
+        valuations={n: i.valuation for n, i in framework_inputs.items()},
+        valuation_problems={n: i.valuation_problem for n, i in framework_inputs.items()},
     )
 
 
