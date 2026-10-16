@@ -8,8 +8,8 @@ tests whether those results held both before and after the 2020 pandemic regime 
 is used only to summarize filings and explain computed numbers. Every claim it makes must cite a
 source, and code checks that each citation is real.
 
-> **Status:** stage 6 of 11 (stability verdicts and break detection) done. Reports, the CLI
-> `analyze` command and the LLM layer are not implemented yet.
+> **Status:** stage 7 of 11 (LLM layer with citation and number verification) done. Reports and
+> the CLI `analyze` command are not implemented yet.
 > Full requirements: [`docs/stock-research-prompt.md`](docs/stock-research-prompt.md) (Traditional Chinese).
 
 ## Data sources and known limitations
@@ -146,6 +146,23 @@ comparisons decide it:
   use the economic gap only (`ECON_ONLY`).
 - **B. Inside V1.** V1 is split at its midpoint and compared the same way, both with and without
   the 2020 crash.
+
+### LLM layer
+
+The LLM summarises filings, gives information-only moat and inversion notes, and explains
+computed numbers in plain Traditional Chinese. It never produces numbers of its own.
+
+- Documents are local files `data/documents/<ticker>/<YYYY-MM-DD>_<title>.(pdf|txt|md)` (the
+  date is the publication date; MOPS is not reachable from the development environment). PDF
+  text that fails quality checks is not sent. V3 only reads documents published by 2019-12-31.
+- Output follows a JSON schema; every claim carries a verbatim quote, document id and date.
+- Code checks each quote against the cited document (after NFKC, whitespace and punctuation
+  normalisation; never Traditional/Simplified conversion) and each number, including Chinese
+  numerals and 兆/億/萬 units, against the document or computed values. Failing claims are
+  marked unverified and kept for the report appendix.
+- `claude-opus-5-5` takes no temperature; `effort` is configured instead. Refusals use the
+  API's default fallback; a failed call is retried once, then reported as failed. Every call
+  is logged to `logs/llm/`.
 
 ### Investor frameworks
 

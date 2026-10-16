@@ -302,9 +302,26 @@ technicals:
 llm:
   provider: anthropic
   model: claude-opus-5-5
-  temperature: 0.0
+  # This model rejects sampling parameters (temperature); thinking is always on and its depth
+  # is set by effort. Reliability comes from the output schema and program verification.
+  effort: high
+  # Maximum response length (output tokens).
+  max_output: 16000
+  # One retry after a failed call (API error, refusal, schema violation), then FAILED.
   max_retries: 1
   log_dir: logs/llm
+  # MOPS is unreachable from the development environment: annual reports and briefing
+  # decks are read from local files <documents_dir>/<ticker>/<YYYY-MM-DD>_<title>.(pdf|txt|md),
+  # where the date is the publication date.
+  documents_dir: data/documents
+  # Documents are sent newest first; beyond this many characters the oldest are dropped.
+  max_document_chars: 400000
+  # Extracted PDF text is rejected below these quality bars (not sent to the LLM).
+  min_document_chars: 500
+  min_cjk_ratio: 0.2
+  max_replacement_ratio: 0.01
+  # A number in a claim matches a source or computed value within this relative gap.
+  number_tolerance: 0.01
 
 report:
   language: zh-TW

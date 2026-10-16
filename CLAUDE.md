@@ -65,6 +65,13 @@
 - LOW_SAMPLE 只用於有觀察值數量的指標與時點值；框架項目與分數不加。
 - Quandt-Andrews 臨界值用 Andrews (1993) 15% 修剪的 F 版本（q=1: 7.12/8.68/12.16；q=2: 5.00/5.86/7.78），已用模擬資料確認；只當資訊，不影響判定。
 
+## 第 7 階段的做法（使用者授權自行判斷）
+- 新增 anthropic（官方 SDK）、pdfplumber（PDF 抽字，MIT）。
+- 模型 `claude-opus-5-5` 不接受 temperature → config 改為 `effort`；結構化輸出用 JSON schema；`fallbacks: "default"` 處理拒答；串流呼叫；失敗重試一次；每次呼叫寫入 `logs/llm/*.jsonl`。
+- MOPS 被擋（回傳安全性封鎖頁），FinMind 新聞只有標題與連結 → 年報等文件改由使用者手動放到 `data/documents/<代號>/YYYY-MM-DD_標題.(pdf|txt|md)`（日期為公告日，已加入 .gitignore）；抽字品質不合格的文件不送 LLM 並列出原因。
+- 引用驗證：NFKC、去空白、標點統一、不做繁簡轉換；數字驗證支援中文數字與兆／億／萬、百分之、%；年／月／季、V1／Q4 這類標籤不當數字。
+- 目前環境沒有 ANTHROPIC_API_KEY，LLM 層只用 mock 測試，尚未實際呼叫。
+
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |
 |---|---|---|---|

@@ -542,9 +542,16 @@ class TechnicalsConfig(_Model):
 class LlmConfig(_Model):
     provider: Literal["anthropic"]
     model: str = Field(min_length=1)
-    temperature: Annotated[float, Field(ge=0.0, le=1.0)]
+    effort: Literal["low", "medium", "high", "xhigh", "max"]
+    max_output: PositiveInt
     max_retries: Annotated[int, Field(ge=0)]
     log_dir: Path
+    documents_dir: Path
+    max_document_chars: PositiveInt
+    min_document_chars: PositiveInt
+    min_cjk_ratio: Fraction
+    max_replacement_ratio: Fraction
+    number_tolerance: Fraction
 
 
 class ReportConfig(_Model):
