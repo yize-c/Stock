@@ -565,6 +565,103 @@ class ReportConfig(_Model):
     reference_links: list[ReferenceLink]
 
 
+# --- validation (spec §14) -----------------------------------------------------------------
+
+Aspect = Literal["revenue", "profitability", "risk"]
+
+
+class DateRange(_Model):
+    start: date
+    end: date
+
+    @model_validator(mode="after")
+    def _ordered(self) -> DateRange:
+        if self.start > self.end:
+            raise ValueError(f"start {self.start} is after end {self.end}")
+        return self
+
+
+def add_months(day: date, months: int) -> date:
+    """Same day ``months`` later; month ends map to month ends (2023-11-30 + 3 = 2024-02-29)."""
+    month = day.month - 1 + months
+    year, month = day.year + month // 12, month % 12 + 1
+    last = (date(year + month // 12, month % 12 + 1, 1) - date.resolution).day
+    is_month_end = (day + date.resolution).month != day.month
+    return date(year, month, last if is_month_end else min(day.day, last))
+
+
+class KnownCasesConfig(_Model):
+    file: Path
+    as_of: date
+
+
+class WalkForwardConfig(_Model):
+    horizon_months: PositiveInt
+    dev: DateRange
+    quarantine: DateRange
+    holdout: DateRange
+    universe: list[str] = Field(min_length=1)
+    min_forward_returns: PositiveInt
+    max_tuning_attempts: PositiveInt
+    tunable: list[str]
+    baseline_draws: PositiveInt
+    bootstrap_draws: PositiveInt
+    confidence: Annotated[float, Field(gt=0.5, lt=1.0)]
+    alpha: Annotated[float, Field(gt=0.0, lt=0.5)]
+    seed: int
+
+    @model_validator(mode="after")
+    def _phases(self) -> WalkForwardConfig:
+        if not self.dev.end < self.quarantine.start <= self.quarantine.end < self.holdout.start:
+            raise ValueError("phases must be ordered: dev < quarantine < holdout")
+        if add_months(self.dev.end, self.horizon_months) > self.quarantine.end:
+            raise ValueError(
+                "dev outcomes would reach past the quarantine: dev.end + horizon_months "
+                f"= {add_months(self.dev.end, self.horizon_months)} > {self.quarantine.end}"
+            )
+        if len(set(self.universe)) != len(self.universe):
+            raise ValueError("walk_forward.universe has duplicates")
+        return self
+
+    def outcome_limit(self, phase: Literal["dev", "holdout"]) -> date:
+        """Last date a phase's outcomes may use."""
+        if phase == "dev":
+            return self.quarantine.end
+        return add_months(self.holdout.end, self.horizon_months)
+
+
+class ForwardTrackingConfig(_Model):
+    enabled: bool
+    compare_after_months: list[PositiveInt]
+
+
+class ExpertsConfig(_Model):
+    kappa_min: Annotated[float, Field(ge=-1.0, le=1.0)]
+    kappa_margin: Fraction
+
+
+class SuccessConfig(_Model):
+    known_cases_accuracy: Fraction
+    report_score_margin: PositiveFloat
+
+
+class ValidationConfig(_Model):
+    directory: Path
+    aspects: dict[Aspect, list[str]]
+    known_cases: KnownCasesConfig
+    walk_forward: WalkForwardConfig
+    forward_tracking: ForwardTrackingConfig
+    experts: ExpertsConfig
+    success: SuccessConfig
+
+    @model_validator(mode="after")
+    def _all_aspects(self) -> ValidationConfig:
+        missing = {"revenue", "profitability", "risk"} - set(self.aspects)
+        if missing or any(not keys for keys in self.aspects.values()):
+            raise ValueError(f"every aspect needs at least one metric (missing: {missing})")
+        return self
+
+
 # --- root ---------------------------------------------------------------------------------
 
 
@@ -580,6 +677,7 @@ class AppConfig(_Model):
     technicals: TechnicalsConfig
     llm: LlmConfig
     report: ReportConfig
+    validation: ValidationConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:

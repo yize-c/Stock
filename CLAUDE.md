@@ -87,6 +87,14 @@
 - Subagents：`data-auditor`、`report-reviewer`、`validation-reviewer`（唯讀）；Skill `stock-analysis`；指令 `/analyze <代號>` 跑分析後交給 report-reviewer。
 - 保留期的執行限制在第 10 階段由程式檢查（`preregistration.md` 未 commit 就拒絕 `--phase holdout`）。
 
+## 第 10 階段的做法（使用者授權自行判斷）
+- 新增 pyarrow（規格要求 parquet 輸出）。程式放 `src/stock_research/validation/`（可測試），紀錄放 `validation/`。
+- 面向：營收 = 月營收年增率（規格的「營收成長率」也用它衡量）；獲利 = ROE、毛利率、營業利益率、EPS；風險 = 波動度、Beta、最大回撤。
+- walk-forward 的預測 = 判定為 UNSTABLE（STABLE、REGIME_SHIFT 表示 V1 能代表現在）；最大回撤的 V1 參考值 = V1 內 H 個月區塊回撤的中位數。
+- 保留期防護：`preregistration.md` 已 commit、無修改、`Status: FINAL`、`Config SHA-256` 與已 commit 的 config 一致，且 `results/holdout_lock.json` 不存在；開始時寫入鎖檔。
+- 已知案例由 Claude 依公開資訊標註（使用者授權），待使用者或專家檢視；walk-forward 樣本是固定的 24 支股票，有倖存者偏差，需在結果中註明。
+- `analyze` 在 as_of 為今天時寫入 `validation/forward_log/`（`--no-forward-log` 可關閉）。
+
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |
 |---|---|---|---|
@@ -148,6 +156,8 @@ uv run stock-research config show        # 驗證並顯示 config
 uv run stock-research validate 2330      # 資料驗證 + 資料健康報告（需 FINMIND_TOKEN）
 uv run stock-research analyze 2330       # 完整分析報告 → reports/2330_<as_of>.md
 uv run stock-research breakpoints 2330   # 結構斷點掃描（僅供參考）
+uv run stock-research validation run known-cases              # 已知案例測試
+uv run stock-research validation run walk-forward --phase dev # 開發期（每次都是一次調參嘗試）
 ```
 
 ## 程式風格

@@ -17,7 +17,9 @@ from pathlib import Path
 FOLDER = Path("validation") / "forward_log"
 HEREDOC = re.compile(r"<<-?\s*(['\"]?)(\w+)\1[^\n]*\n.*?\n\s*\2(?=\s|$)", re.DOTALL)
 SEGMENT = re.compile(r"&&|\|\||[;|\n]")
-REDIRECT = re.compile(r">>?\s*\S*forward_log")
+# The folder itself: "forward_log/..." or a bare "forward_log", not "forward_log.py".
+DIRECTORY = re.compile(r"forward_log(?=/|\s|$|['\"])")
+REDIRECT = re.compile(r">>?\s*['\"]?\S*forward_log(?=/|\s|$|['\"])")
 WRITERS = re.compile(r"^\s*(sudo\s+)?(rm|mv|cp|tee|truncate|sed\s+-i|perl\s+-i|git\s+(rm|mv))\b")
 
 
@@ -29,7 +31,7 @@ def _inside(path: Path, root: Path) -> bool:
 
 def shell_writes_forward_log(command: str) -> bool:
     for segment in SEGMENT.split(HEREDOC.sub("", command)):
-        if "forward_log" not in segment:
+        if not DIRECTORY.search(segment):
             continue
         if REDIRECT.search(segment) or WRITERS.search(segment):
             return True

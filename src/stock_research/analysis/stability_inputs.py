@@ -212,7 +212,10 @@ class StabilityReport:
     valuation_problems: dict[WindowName, str | None]
 
 
-def stability_report(data: StockData, config: AppConfig) -> StabilityReport:
+def stability_report(
+    data: StockData, config: AppConfig, *, with_breakpoints: bool = True
+) -> StabilityReport:
+    """``with_breakpoints=False`` skips the (slow, information-only) break scan."""
     windows = {name: build_window(name, config, data.as_of) for name in STEP_WINDOWS}
     ttm = ttm_table(data.quarterly, data.basis, data.as_of)
     plain = {n: _window_data(data, w, ttm, False, config) for n, w in windows.items()}
@@ -269,7 +272,7 @@ def stability_report(data: StockData, config: AppConfig) -> StabilityReport:
         overall=aggregate(verdicts),
         framework_results=results,
         composites=composites,
-        breakpoints=_breakpoints(plain[WindowName.FULL], config),
+        breakpoints=_breakpoints(plain[WindowName.FULL], config) if with_breakpoints else [],
         valuations={n: i.valuation for n, i in framework_inputs.items()},
         valuation_problems={n: i.valuation_problem for n, i in framework_inputs.items()},
     )
@@ -366,3 +369,8 @@ def _breakpoints(full: WindowData, config: AppConfig) -> list[bp.BreakResult | I
             bp.quandt_andrews(series, model, trimming=trimming, alpha=alpha, reference=reference)
         )
     return out
+
+
+def metric_specs(config: AppConfig) -> dict[str, MetricSpec]:
+    """The numeric metrics' specs (gap rule and tolerance) by key."""
+    return {spec.key: spec for spec in _specs(config)}

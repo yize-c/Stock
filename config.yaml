@@ -333,3 +333,58 @@ report:
     - { name: "Yahoo 奇摩股市", url: "https://tw.stock.yahoo.com/quote/{yahoo_symbol}" }
     - { name: "鉅亨網", url: "https://www.cnyes.com/twstock/{code}" }
     - { name: "公開資訊觀測站（輸入代號查詢）", url: "https://mops.twse.com.tw/mops/" }
+
+validation:
+  # Spec §14. Paths are relative to the working directory (the repository root).
+  directory: validation
+  # §14.1: aspect verdict = worst verdict of its metrics; overall = worst aspect.
+  # "營收成長率" is measured by the monthly revenue YoY (the only revenue-growth metric).
+  aspects:
+    revenue: [revenue_yoy]
+    profitability: [roe, gross_margin, operating_margin, eps]
+    risk: [volatility, beta, max_drawdown]
+  known_cases:
+    file: validation/known_cases.yaml
+    as_of: 2026-09-30
+  walk_forward:
+    horizon_months: 3
+    # Base dates are month ends inside each range. Quarantine base dates are never used.
+    dev: { start: 2023-12-31, end: 2025-06-30 }
+    quarantine: { start: 2025-07-01, end: 2025-09-30 }
+    holdout: { start: 2025-10-31, end: 2026-06-30 }
+    # Fixed list chosen before any run: the known cases plus large and mid caps across
+    # industries, all listed before the first base date (see preregistration.md for the
+    # survivorship limitation).
+    universe: [
+      "2603", "2609", "2615", "2382", "3231", "2376", "9921",
+      "2412", "1216", "2912", "9917",
+      "2330", "2317", "2454", "2308", "1301", "2002", "1101", "2881",
+      "6488", "5347", "3008", "2207", "2105",
+    ]
+    # Fewer forward daily returns than this leaves a price outcome unavailable.
+    min_forward_returns: 20
+    max_tuning_attempts: 30
+    # Config paths a dev run may override with --set (spec §14.4 tunable parameters).
+    tunable:
+      - stability.absolute_tolerance
+      - stability.relative_tolerance
+      - weighting.half_life_days
+      - stability.internal_split
+      - stability.crash_exclusion
+    baseline_draws: 1000
+    bootstrap_draws: 1000
+    confidence: 0.95
+    alpha: 0.05
+    seed: 20231231
+  forward_tracking:
+    enabled: true
+    compare_after_months: [6, 12]
+  experts:
+    # Cohen's kappa (tool vs expert majority) must reach kappa_min, or be no lower than
+    # the experts' own kappa minus kappa_margin.
+    kappa_min: 0.6
+    kappa_margin: 0.1
+  # Preregistered success criteria (§14.2); preregistration.md restates them.
+  success:
+    known_cases_accuracy: 0.80
+    report_score_margin: 0.5

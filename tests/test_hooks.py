@@ -141,6 +141,8 @@ def test_forward_log_allows_new_files_and_blocks_existing(tmp_path):
         ("sed -i s/a/b/ validation/forward_log/a.md", 2),
         ("mv validation/forward_log/a.md /tmp/", 2),
         ("echo x > other.md", 0),
+        ("cat > src/pkg/forward_log.py <<'EOF'\nx = 1\nEOF", 0),
+        ("rm validation/forward_log", 2),
         ("cat > t.py <<'EOF'\nrun('echo x >> validation/forward_log/a.md')\nEOF\npytest", 0),
     ],
 )

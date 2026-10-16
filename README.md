@@ -8,8 +8,8 @@ tests whether those results held both before and after the 2020 pandemic regime 
 is used only to summarize filings and explain computed numbers. Every claim it makes must cite a
 source, and code checks that each citation is real.
 
-> **Status:** stage 9 of 11 (Claude Code project settings: hooks, subagents, skill, `/analyze`)
-> done. The validation tools (stage 10) are not implemented yet.
+> **Status:** stage 10 of 11 (tools that validate the tool: preregistration, known cases,
+> monthly walk-forward with a one-shot holdout, forward tracking, expert scoring) done.
 > Full requirements: [`docs/stock-research-prompt.md`](docs/stock-research-prompt.md) (Traditional Chinese).
 
 ## Data sources and known limitations
@@ -111,14 +111,39 @@ exits with code 1 without writing an analysis. Reports are in Traditional Chines
 the disclaimer. Sharpe ratios fail loudly until `markets.tw.risk_free.fallback_rates` covers the
 window.
 
-Planned commands (stage 10):
+Validating the tool itself (spec §14; see [Validation](#validation)):
 
 ```bash
-stock-research validation run known-cases
-stock-research validation run point-in-time
-stock-research validation export-expert-forms
-stock-research validation score-experts
+uv run stock-research validation run known-cases                 # expected vs tool, accuracy
+uv run stock-research validation run walk-forward --phase dev     # one tuning attempt (max 30)
+uv run stock-research validation run walk-forward --phase dev --set stability.relative_tolerance=0.2
+uv run stock-research validation run walk-forward --phase holdout # once, after preregistration
+uv run stock-research validation run point-in-time                # no data after as_of
+uv run stock-research validation forward-compare --months 6       # forward log vs what happened
+uv run stock-research validation export-expert-forms 2330 2412    # blind forms + tool verdicts
+uv run stock-research validation score-experts validation/expert_forms/<date>
 ```
+
+## Validation
+
+Code in `src/stock_research/validation/`, records in `validation/`:
+
+| File | Purpose |
+|---|---|
+| `validation/preregistration.md` | Success criteria and definitions, committed before any run. The holdout runs only when it says `Status: FINAL`, states the SHA-256 of the committed `config.yaml`, and is itself committed and unmodified |
+| `validation/known_cases.yaml` | Expected changes per aspect (revenue, profitability, risk), written before running the tool |
+| `validation/results/tuning_log.csv` | Every dev-phase attempt, append-only, at most 30 |
+| `validation/results/walk_forward.parquet` | Every (stock, base date, metric) row of every run |
+| `validation/results/holdout_lock.json` | Written when the holdout starts; a second holdout run is refused |
+| `validation/forward_log/` | Verdicts of each analysis run at today's date, with git commit and config hash; never overwritten |
+| `validation/expert_forms/<date>/` | Blank form, the tool's verdicts at the same date, filled forms and scores |
+
+Walk-forward in brief: each month-end base date runs the tool with `--as-of`; for every aspect
+metric the change over the next three months (next published TTM for statements) is divided by
+the §5 tolerance. Success is never defined by price moves: UNSTABLE rows must show larger
+normalized changes than STABLE / REGIME_SHIFT rows (one-sided Mann-Whitney, block bootstrap
+by stock and quarter) and the tool's AUC must beat the 95th percentile of shuffled verdicts.
+Dev outcomes stop at the end of the quarantine (checked when the config loads).
 
 ## Claude Code settings
 
