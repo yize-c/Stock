@@ -8,8 +8,8 @@ tests whether those results held both before and after the 2020 pandemic regime 
 is used only to summarize filings and explain computed numbers. Every claim it makes must cite a
 source, and code checks that each citation is real.
 
-> **Status:** stage 4 of 11 (analysis layer: weighting, fundamentals, monthly revenue, risk)
-> done. Frameworks, stability verdicts, reports and the LLM layer are not implemented yet.
+> **Status:** stage 5 of 11 (investor frameworks and composite score) done. Stability verdicts,
+> reports and the LLM layer are not implemented yet.
 > Full requirements: [`docs/stock-research-prompt.md`](docs/stock-research-prompt.md) (Traditional Chinese).
 
 ## Data sources and known limitations
@@ -146,6 +146,27 @@ comparisons decide it:
   use the economic gap only (`ECON_ONLY`).
 - **B. Inside V1.** V1 is split at its midpoint and compared the same way, both with and without
   the 2020 crash.
+
+### Investor frameworks
+
+Seven rule checklists run once per window: Warren Chou, Guyu and Chen Chung-Ming (Taiwan, 60%)
+and Buffett, Graham, Lynch and Munger (international, 40%). Each scored item ends as PASS, FAIL,
+INSUFFICIENT or NOT_APPLICABLE; a framework's score is PASS / (PASS + FAIL). N/A frameworks are
+renormalised inside their group before the groups are combined. LLM judgements (moat, inversion)
+are information only. The score describes fit with these investors' principles; it is not a
+recommendation.
+
+- Level rules use each window's weighted TTM value (V2 unweighted); "every year" rules use all
+  fiscal years in V1/V3 (at least 5) and the latest 10 in V2; valuation rules use the window's
+  valuation date (V3: 2019-12-31, with only figures published by then).
+- Industry medians (Chen Chung-Ming, Munger) are computed from every listed peer in the same
+  exchange industry, the same way and in the same window as the stock. Peer statements are
+  cached for 7 days; a peer that cannot be loaded makes the median unavailable rather than
+  being skipped. The first run for a large industry can take hours under FinMind's free quota.
+- Buffett's debt rule uses interest-bearing borrowings / equity; Warren Chou's core EPS is
+  operating income per share.
+- Warren Chou's inflation comparison needs CPI. The statistics bureau (DGBAS) is blocked from
+  the development environment, so that item reports insufficient data until a CPI source exists.
 
 ### Metric definitions
 

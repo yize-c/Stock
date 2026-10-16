@@ -6,6 +6,9 @@ from datetime import UTC, date, datetime, time, timedelta
 import pandas as pd
 import pytest
 
+from stock_research.analysis.frameworks import run_all
+from stock_research.analysis.inputs import build_inputs
+from stock_research.analysis.scoring import composite
 from stock_research.config import AppConfig, ManualClosure, Secrets, load_config
 from stock_research.data.cache import Cache
 from stock_research.data.errors import AnomalyError, MissingDataError
@@ -14,6 +17,7 @@ from stock_research.data.fetchers.tpex import BASE_URL, TpexFetcher
 from stock_research.data.fetchers.yahoo import YahooFetcher
 from stock_research.data.http import JsonClient, RateLimiter
 from stock_research.data.market_data import MarketData, calendar_from_sources
+from stock_research.data.windows import WindowName
 from stock_research.markets.calendar import CalendarConflictError, CalendarCoverageError
 from stock_research.markets.tickers import Market, Ticker
 from tests.fakes import RoutingSession, fixture_text
@@ -395,3 +399,79 @@ def test_open_wires_real_clients_without_network(raw_config, write_config, monke
     with Cache(":memory:") as cache:
         md = MarketData.open(config, Secrets(None), cache)
         assert isinstance(md, MarketData) and md.today() >= date(2026, 1, 1)
+
+
+# --- industries and peers -------------------------------------------------------------------------
+
+
+def info_row(code: str, category: str, kind: str = "twse") -> dict:
+    return {
+        "stock_id": code,
+        "stock_name": code,
+        "type": kind,
+        "industry_category": category,
+        "date": "2026-10-16",
+    }
+
+
+def test_industry_ignores_broad_categories_and_merges_spellings(make) -> None:
+    routes = base_routes()
+    routes[("TaiwanStockInfo", None)] = [
+        info_row("2330", "半導體業"),
+        info_row("2330", "電子工業"),
+        info_row("6488", "半導體業", "tpex"),
+        info_row("3105", "其他電子類", "tpex"),
+        info_row("2317", "其他電子業"),
+        info_row("2317", "電子工業"),
+        info_row("0050", "半導體業"),  # an ETF code: never a peer
+        info_row("1234", "半導體業"),
+        info_row("1234", "光電業"),
+    ]
+    md, _ = make(routes)
+    assert md.industry("2330") == "半導體業"
+    assert md.industry("3105") == md.industry("2317") == "其他電子業"
+    assert md.industry_groups("半導體業") == frozenset({"semiconductor"})
+    assert [t.code for t in md.peers("半導體業", exclude="2330")] == ["1234", "6488"]
+    assert [t.code for t in md.peers("其他電子業", exclude="2317")] == ["3105"]
+    with pytest.raises(AnomalyError, match="overrides"):
+        md.industry("1234")
+
+
+def test_industry_override(make) -> None:
+    md, _ = make(
+        tweak=lambda c: c["markets"]["tw"]["industries"]["overrides"].append(
+            {"ticker": "2330", "industry": "光電業"}
+        )
+    )
+    assert md.industry("2330") == "光電業"
+
+
+def test_peer_financials_are_income_and_balance_only(make) -> None:
+    md, session = make()
+    rows = md.peer_financials(TSMC, date(2020, 3, 31))
+    assert set(rows["statement"]) == {"income", "balance"}
+    datasets = {c["params"]["dataset"] for c in session.calls}
+    assert "TaiwanStockCashFlowsStatement" not in datasets
+
+
+def test_build_inputs_end_to_end(make) -> None:
+    routes = base_routes()
+    for dataset in ("TaiwanStockFinancialStatements", "TaiwanStockBalanceSheet"):
+        routes[(dataset, "6488")] = routes[(dataset, "2330")]
+    md, _ = make(routes, overrides=[TSMC_LISTING])
+    config = md._config
+    messages: list[str] = []
+    inputs = build_inputs(md, config, "2330", AS_OF, progress=messages.append)
+    assert set(inputs) == {WindowName.POST_2020, WindowName.FULL, WindowName.PRE_2020}
+    assert messages == ["半導體業: loading 1 peer(s)"]
+    v3 = inputs[WindowName.PRE_2020]
+    assert v3.industry == "半導體業" and v3.groups == frozenset({"semiconductor"})
+    # Prices in the fixtures start in 2026, so V3 has no valuation; the reason is kept.
+    assert v3.valuation is None and "raw close" in v3.valuation_problem
+    assert v3.peers.peers_total == 1 and v3.peers.values["gross_margin"] is None
+    assert "CPI" in v3.cpi_problem
+    v1 = inputs[WindowName.POST_2020]
+    assert v1.valuation is not None and v1.valuation.price == 2440.0
+    for window_inputs in inputs.values():
+        results = run_all(window_inputs)
+        assert composite(results, config.scoring).window is window_inputs.window.name

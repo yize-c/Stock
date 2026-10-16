@@ -155,6 +155,34 @@ class PerShareConfig(_Model):
     share_count_tolerance: Fraction
 
 
+class IndustryOverride(_Model):
+    ticker: Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]
+    industry: str = Field(min_length=1)
+
+
+class PeerConfig(_Model):
+    min_peers: PositiveInt
+    cache_max_age_days: PositiveFloat
+
+
+class IndustryConfig(_Model):
+    ignored_categories: list[str]
+    aliases: dict[str, str]
+    overrides: list[IndustryOverride]
+    groups: dict[str, list[str]]
+    peers: PeerConfig
+
+    @model_validator(mode="after")
+    def _check(self) -> IndustryConfig:
+        tickers = [o.ticker for o in self.overrides]
+        if len(set(tickers)) != len(tickers):
+            raise ValueError("industries.overrides contains duplicate tickers")
+        aliased = sorted(set(self.aliases) & {i for g in self.groups.values() for i in g})
+        if aliased:
+            raise ValueError(f"industry groups must use canonical names, not aliases: {aliased}")
+        return self
+
+
 class ListingOverride(_Model):
     ticker: Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]
     listing_date: date
@@ -220,6 +248,7 @@ class TwMarketConfig(_Model):
     trading_calendar: TradingCalendarConfig
     known_suspensions: list[KnownSuspension]
     per_share: PerShareConfig
+    industries: IndustryConfig
     listing: ListingConfig
     benchmark: TwBenchmarkConfig
     risk_free: RiskFreeConfig
@@ -550,6 +579,16 @@ class AppConfig(_Model):
         fixed = self.stability.internal_split.fixed_date
         if fixed is not None and fixed <= split:
             raise ValueError("internal_split.fixed_date must be after regime_split_date")
+        groups = set(self.markets.tw.industries.groups)
+        fw = self.frameworks
+        used = {
+            *fw.guyu.excluded_industries,
+            *fw.guyu.expected_roe_by_industry,
+            *fw.chen_chung_ming.preferred_industries,
+            "financial",
+        }
+        if used - groups:
+            raise ValueError(f"industry groups used by frameworks are undefined: {used - groups}")
         if not getattr(self.markets, self.general.default_market).enabled:
             raise ValueError(f"default_market '{self.general.default_market}' is not enabled")
         return self

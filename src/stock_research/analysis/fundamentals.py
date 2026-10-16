@@ -140,32 +140,42 @@ def _consecutive(ends: list[date]) -> bool:
 def ttm_table(quarterly: pd.DataFrame, basis: ShareBasis | None, basis_date: date) -> pd.DataFrame:
     """Trailing-four-quarter figures and ratios, one row per quarter end.
 
-    ``eps`` is the sum of four quarterly EPS restated to the share basis of ``basis_date``
-    (unrestated when ``basis`` is None, e.g. no share-changing events).
+    Only four consecutive quarters form a TTM row; a flow missing in any of them leaves the
+    sum NaN. ``eps`` is the sum of four quarterly EPS restated to the share basis of
+    ``basis_date`` (unrestated when ``basis`` is None).
     """
+    ends = list(quarterly.index)
+    if len(ends) < 4:
+        return pd.DataFrame()
     eps = quarterly["eps"].astype(float)
     if basis is not None:
-        eps = basis.to_basis(eps, pd.Series(quarterly.index, index=quarterly.index), basis_date)
-    rows = []
-    ends = list(quarterly.index)
-    for i in range(3, len(ends)):
-        span = ends[i - 3 : i + 1]
-        if not _consecutive(span):
-            continue
-        q = quarterly.loc[span]
-        flows = q[FLOW_COLUMNS].sum(min_count=4)
-        averages = q[BALANCE_COLUMNS].mean()
-        row = {
-            "period_start": _quarter_start(span[0]),
-            "period_end": span[-1],
-            "available_date": max(q["available_date"]),
-            **{c: flows[c] for c in FLOW_COLUMNS},
-            "eps": float(eps.loc[span].sum(min_count=4)),
-            **{f"avg_{c}": averages[c] for c in BALANCE_COLUMNS},
-            **{c: q[c].iloc[-1] for c in BALANCE_COLUMNS},
-        }
-        rows.append(_ratios(row))
-    return pd.DataFrame(rows)
+        eps = basis.to_basis(eps, pd.Series(ends, index=quarterly.index), basis_date)
+    flows = quarterly[FLOW_COLUMNS].astype(float).rolling(4, min_periods=4).sum()
+    averages = quarterly[BALANCE_COLUMNS].astype(float).rolling(4, min_periods=1).mean()
+    ordinals = pd.Series(
+        [d.toordinal() for d in quarterly["available_date"]], index=quarterly.index
+    )
+    available = ordinals.rolling(4).max()
+    consecutive = [i >= 3 and _consecutive(ends[i - 3 : i + 1]) for i in range(len(ends))]
+    frame = pd.DataFrame(
+        {
+            "period_start": [
+                _quarter_start(ends[i - 3]) if i >= 3 else None for i in range(len(ends))
+            ],
+            "period_end": ends,
+            "available_date": [
+                date.fromordinal(int(a)) if not np.isnan(a) else None for a in available
+            ],
+        },
+        index=quarterly.index,
+    )
+    frame[FLOW_COLUMNS] = flows
+    frame["eps"] = eps.rolling(4, min_periods=4).sum()
+    for col in BALANCE_COLUMNS:
+        frame[f"avg_{col}"] = averages[col]
+        frame[col] = quarterly[col].astype(float)
+    frame = frame.loc[consecutive].reset_index(drop=True)
+    return _ratios(frame)
 
 
 def annual_table(
@@ -180,41 +190,30 @@ def annual_table(
     return annual.reset_index(drop=True)
 
 
-def _div(numerator: float, denominator: float) -> float:
-    if pd.isna(numerator) or pd.isna(denominator) or denominator <= 0:
-        return np.nan
-    return float(numerator) / float(denominator)
+def _div(numerator: pd.Series, denominator: pd.Series) -> pd.Series:
+    """Ratio; NaN where the denominator is not positive or either side is missing."""
+    return (numerator / denominator.where(denominator > 0)).astype(float)
 
 
-def _ratios(row: dict) -> dict:
-    tax_rate = _div(row["income_tax"], row["pretax_income"])
-    nopat = (
-        row["operating_income"] * (1.0 - min(max(tax_rate, 0.0), 1.0))
-        if not pd.isna(tax_rate)
-        else np.nan
-    )
-    capex = -row["ppe_purchases"] if not pd.isna(row["ppe_purchases"]) else np.nan
-    interest = row["interest_expense"]
-    if pd.isna(interest) or pd.isna(row["pretax_income"]):
-        coverage = np.nan
-    elif interest == 0:
-        coverage = np.inf
-    else:
-        coverage = _div(row["pretax_income"] + interest, interest)
-    row.update(
-        gross_margin=_div(row["gross_profit"], row["revenue"]),
-        operating_margin=_div(row["operating_income"], row["revenue"]),
-        net_margin=_div(row["net_income"], row["revenue"]),
-        roe=_div(row["net_income_parent"], row["avg_parent_equity"]),
-        roic=_div(nopat, row["avg_total_equity"] + row["avg_borrowings"]),
-        free_cash_flow=row["operating_cash_flow"] - capex,
+def _ratios(frame: pd.DataFrame) -> pd.DataFrame:
+    tax_rate = _div(frame["income_tax"], frame["pretax_income"]).clip(0.0, 1.0)
+    nopat = frame["operating_income"] * (1.0 - tax_rate)
+    interest = frame["interest_expense"]
+    coverage = (frame["pretax_income"] + interest) / interest.where(interest > 0)
+    coverage = coverage.mask(interest == 0, np.inf).mask(frame["pretax_income"].isna())
+    return frame.assign(
+        gross_margin=_div(frame["gross_profit"], frame["revenue"]),
+        operating_margin=_div(frame["operating_income"], frame["revenue"]),
+        net_margin=_div(frame["net_income"], frame["revenue"]),
+        roe=_div(frame["net_income_parent"], frame["avg_parent_equity"]),
+        roic=_div(nopat, frame["avg_total_equity"] + frame["avg_borrowings"]),
+        free_cash_flow=frame["operating_cash_flow"] + frame["ppe_purchases"],
         interest_coverage=coverage,
-        core_profit_ratio=_div(row["operating_income"], row["pretax_income"]),
-        current_ratio=_div(row["current_assets"], row["current_liabilities"]),
-        liabilities_to_equity=_div(row["total_liabilities"], row["total_equity"]),
-        borrowings_to_equity=_div(row["borrowings"], row["total_equity"]),
+        core_profit_ratio=_div(frame["operating_income"], frame["pretax_income"]),
+        current_ratio=_div(frame["current_assets"], frame["current_liabilities"]),
+        liabilities_to_equity=_div(frame["total_liabilities"], frame["total_equity"]),
+        borrowings_to_equity=_div(frame["borrowings"], frame["total_equity"]),
     )
-    return row
 
 
 def summarize(
@@ -276,7 +275,7 @@ def valuation_snapshot(
 
     end = last["period_end"]
     shares = last["ordinary_share_capital"] / basis.par_on(end) * basis.factor(end, on)
-    bvps = _div(last["parent_equity"], shares) if last["parent_equity"] > 0 else np.nan
+    bvps = last["parent_equity"] / shares if last["parent_equity"] > 0 and shares > 0 else np.nan
 
     year_ago = date(end.year - 1, end.month, end.day)  # quarter ends exist every year
     eps = basis.to_basis(published["eps"], pd.Series(published.index, index=published.index), on)
@@ -295,9 +294,137 @@ def valuation_snapshot(
         eps_ttm=float(last["eps"]),
         eps_period_end=end,
         book_value_per_share=bvps,
-        pe=_div(price, last["eps"]),
-        pb=_div(price, bvps),
+        pe=price / last["eps"] if last["eps"] > 0 else np.nan,
+        pb=price / bvps if bvps > 0 else np.nan,
         dividend_yield=float(cash) / price,
         latest_quarter=end,
         latest_quarter_eps_yoy=eps_yoy,
     )
+
+
+def annual_growth(annual: pd.DataFrame, column: str) -> pd.DataFrame:
+    """Year-over-year growth of an annual column.
+
+    Each row's period runs from the start of the prior year to the end of the current one,
+    so a growth rate belongs to a window only if both years do. Growth from a base <= 0 is NaN.
+    """
+    rows = annual.sort_values("period_end").reset_index(drop=True)
+    out = []
+    for prev, cur in zip(rows.itertuples(), rows.iloc[1:].itertuples(), strict=False):
+        if cur.year != prev.year + 1:
+            continue
+        base, value = getattr(prev, column), getattr(cur, column)
+        out.append(
+            {
+                "year": cur.year,
+                "period_start": prev.period_start,
+                "period_end": cur.period_end,
+                "available_date": cur.available_date,
+                "growth": value / base - 1.0 if base > 0 else np.nan,
+            }
+        )
+    return pd.DataFrame(
+        out, columns=["year", "period_start", "period_end", "available_date", "growth"]
+    )
+
+
+def core_eps(quarterly: pd.DataFrame, basis: ShareBasis, basis_date: date) -> pd.Series:
+    """Operating income per share for each quarter, on the share basis of ``basis_date``.
+
+    Shares are those outstanding at the quarter end (capital / par).
+    """
+    pars = np.array([basis.par_on(end) for end in quarterly.index])
+    shares = quarterly["ordinary_share_capital"].astype(float) / pars
+    per_share = quarterly["operating_income"].astype(float) / shares.where(shares > 0)
+    days = pd.Series(quarterly.index, index=quarterly.index)
+    return basis.to_basis(per_share, days, basis_date)
+
+
+def basis_price(raw_prices: pd.DataFrame, on: date, basis: ShareBasis, basis_date: date) -> float:
+    """Raw close on the last trading day <= ``on``, restated to the share basis of
+    ``basis_date`` (splits and stock dividends removed, cash dividends not added back)."""
+    traded = raw_prices.loc[raw_prices["close"].notna() & (raw_prices["date"] <= on)]
+    if traded.empty:
+        raise MissingDataError(None, "close", "none", f"a raw close on or before {on}")
+    row = traded.iloc[-1]
+    return float(row["close"]) / basis.factor(row["date"], basis_date)
+
+
+def fiscal_year_dividends(
+    dividends: pd.DataFrame, basis: ShareBasis, basis_date: date
+) -> pd.DataFrame:
+    """Cash, stock and total dividends per share by fiscal year, on one share basis.
+
+    Quarterly and half-year declarations are summed into their fiscal year. A year counts
+    only up to the last fiscal year whose final period (ending 31 Dec) has been declared, so a
+    year whose dividends are not all announced yet never looks like a cut. A year inside that
+    range without any declaration is a year without dividends; it is known once a later year's
+    declaration is published. Rights offerings (no fiscal period) are ignored.
+    """
+    columns = ["year", "period_start", "period_end", "available_date", "cash", "stock", "total"]
+    if dividends.empty:
+        return pd.DataFrame(columns=columns)
+    # Fiscal years before the share basis starts (pre-IFRS) are not restated or used.
+    declared = dividends.loc[
+        [
+            not pd.isna(end) and end is not None and end >= basis.start
+            for end in dividends["period_end"]
+        ]
+    ]
+    if declared.empty:
+        return pd.DataFrame(columns=columns)
+    when = [
+        ex if ex is not None and not pd.isna(ex) else announced
+        for ex, announced in zip(declared["cash_ex_date"], declared["available_date"], strict=True)
+    ]
+    stock_when = [
+        ex if ex is not None and not pd.isna(ex) else announced
+        for ex, announced in zip(declared["stock_ex_date"], declared["available_date"], strict=True)
+    ]
+    frame = pd.DataFrame(
+        {
+            "year": [pd.Timestamp(d).year for d in declared["period_end"]],
+            "final": [pd.Timestamp(d).month == 12 for d in declared["period_end"]],
+            "available_date": list(declared["available_date"]),
+            "cash": basis.to_basis(
+                declared["cash_dividend"].reset_index(drop=True),
+                pd.Series(when),
+                basis_date,
+                include_start=True,
+            ),
+            "stock": basis.to_basis(
+                declared["stock_dividend"].reset_index(drop=True),
+                pd.Series(stock_when),
+                basis_date,
+                include_start=True,
+            ),
+        }
+    )
+    complete = frame.loc[frame["final"], "year"]
+    if complete.empty:
+        return pd.DataFrame(columns=columns)
+    rows = []
+    first, last = int(frame["year"].min()), int(complete.max())
+    for year in range(first, last + 1):
+        part = frame.loc[frame["year"] == year]
+        if part.empty:
+            later = frame.loc[frame["year"] > year, "available_date"]
+            available, cash, stock = min(later), 0.0, 0.0
+        else:
+            available, cash, stock = (
+                max(part["available_date"]),
+                part["cash"].sum(),
+                part["stock"].sum(),
+            )
+        rows.append(
+            {
+                "year": year,
+                "period_start": date(year, 1, 1),
+                "period_end": date(year, 12, 31),
+                "available_date": available,
+                "cash": float(cash),
+                "stock": float(stock),
+                "total": float(cash + stock),
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)

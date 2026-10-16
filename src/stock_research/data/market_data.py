@@ -17,6 +17,7 @@ reachable from the development environment). Where both cover the same days they
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
@@ -155,11 +156,14 @@ class MarketData:
         yahoo: YahooFetcher,
         tpex: TpexFetcher | None = None,
         *,
+        peer_finmind: FinMindFetcher | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._config = config
         self._tw = config.markets.tw
         self._finmind = finmind
+        # Peer statements use a longer cache (see markets.tw.industries.peers).
+        self._peer_finmind = peer_finmind or finmind
         self._yahoo = yahoo
         self._tpex = tpex
         self._clock = clock
@@ -208,6 +212,63 @@ class MarketData:
 
     def resolve(self, code: str) -> Ticker:
         return self.stock_info(code).ticker
+
+    # --- industries ---------------------------------------------------------------------------
+
+    def _candidate_industries(self, categories: tuple[str, ...]) -> set[str]:
+        """Exchange categories minus boards/broad parents, with TWSE/TPEx spellings merged."""
+        industries = self._tw.industries
+        named = {industries.aliases.get(c, c) for c in categories}
+        specific = named - set(industries.ignored_categories)
+        return specific or named
+
+    def industry(self, code: str) -> str:
+        """The stock's industry; a config override wins, an ambiguous one raises."""
+        overrides = {o.ticker: o.industry for o in self._tw.industries.overrides}
+        if code in overrides:
+            return overrides[code]
+        candidates = self._candidate_industries(self.stock_info(code).industries)
+        if len(candidates) != 1:
+            raise AnomalyError(
+                code,
+                "industry",
+                sorted(candidates),
+                "one industry (add markets.tw.industries.overrides)",
+            )
+        return candidates.pop()
+
+    def industry_groups(self, industry: str) -> frozenset[str]:
+        groups = self._tw.industries.groups
+        return frozenset(name for name, members in groups.items() if industry in members)
+
+    def peers(self, industry: str, exclude: str) -> list[Ticker]:
+        """Every listed common share in ``industry`` (both markets), except ``exclude``."""
+        self.stock_info(exclude)  # loads the listing
+        assert self._memo.info is not None
+        overrides = {o.ticker: o.industry for o in self._tw.industries.overrides}
+        found = []
+        for row in self._memo.info.itertuples(index=False):
+            if row.code == exclude or row.market is None or not _COMMON_SHARE.match(row.code):
+                continue
+            industries = (
+                {overrides[row.code]}
+                if row.code in overrides
+                else self._candidate_industries(row.industries)
+            )
+            if industry in industries:
+                found.append(Ticker(row.code, Market(row.market)))
+        return found
+
+    def peer_financials(self, ticker: Ticker, as_of: date) -> pd.DataFrame:
+        """Income and balance-sheet rows for a peer (long cache), as published by ``as_of``."""
+        start = date(self._config.general.ifrs_start_year, 1, 1)
+        frames = [
+            self._peer_finmind.statement(ticker.code, s, start, self.today())
+            for s in (Statement.INCOME, Statement.BALANCE)
+        ]
+        rows = pd.concat(frames, ignore_index=True)
+        rows = rows.loc[pd.to_datetime(rows["period_start"]) >= pd.Timestamp(start)]
+        return as_of_view(rows, as_of).reset_index(drop=True)
 
     # --- point-in-time data -----------------------------------------------------------------
 
@@ -520,6 +581,7 @@ class MarketData:
             cache,
             timeout_seconds=sources.request_timeout_seconds,
         )
+        peer_age = timedelta(days=config.markets.tw.industries.peers.cache_max_age_days)
         return cls(
             config,
             FinMindFetcher(
@@ -534,10 +596,16 @@ class MarketData:
                 max_age=max_age,
             ),
             TpexFetcher(tpex_http, max_age),
+            peer_finmind=FinMindFetcher(
+                FinMindClient(finmind_http, peer_age),
+                config.markets.tw.filing_deadlines,
+                snapshots=cache,
+            ),
         )
 
 
 T = TypeVar("T")
+_COMMON_SHARE = re.compile(r"^[1-9]\d{3}$")
 
 
 def _attempt(report: HealthReport, name: str, check: Callable[[], T]) -> T | None:

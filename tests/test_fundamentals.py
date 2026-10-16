@@ -141,12 +141,12 @@ def test_ratios_edge_cases() -> None:
         "total_equity": 400.0,
         "borrowings": 100.0,
     }
-    row = _ratios(dict(base))
+    row = _ratios(pd.DataFrame([base])).iloc[0]
     assert np.isnan(row["roe"]) and np.isnan(row["current_ratio"])
     assert row["interest_coverage"] == np.inf
     assert row["free_cash_flow"] == 20.0
     assert row["roic"] == pytest.approx(90 * 0.9 / 500)
-    loss = _ratios(dict(base, pretax_income=-1.0, income_tax=0.0))
+    loss = _ratios(pd.DataFrame([base | {"pretax_income": -1.0, "income_tax": 0.0}])).iloc[0]
     assert np.isnan(loss["core_profit_ratio"]) and np.isnan(loss["roic"])
 
 

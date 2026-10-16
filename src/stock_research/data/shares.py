@@ -58,10 +58,13 @@ class ShareBasis:
             raise MissingDataError(
                 self.ticker, "share_basis", after.isoformat(), f"a date on or after {self.start}"
             )
-        days = self.multipliers["effective_date"]
-        lower = days >= after if include_start else days > after
-        mask = lower & (days <= through)
-        return float(np.prod(self.multipliers.loc[mask, "multiplier"].to_numpy(dtype=float)))
+        days, values = self._arrays()
+        lower = days >= after.toordinal() if include_start else days > after.toordinal()
+        return float(np.prod(values[lower & (days <= through.toordinal())]))
+
+    def _arrays(self) -> tuple[np.ndarray, np.ndarray]:
+        days = np.array([d.toordinal() for d in self.multipliers["effective_date"]], dtype=int)
+        return days, self.multipliers["multiplier"].to_numpy(dtype=float)
 
     def par_on(self, day: date) -> float:
         prior = self.multipliers.loc[self.multipliers["effective_date"] <= day, "par_after"]

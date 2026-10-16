@@ -39,35 +39,28 @@ def yoy_table(ticker: str, revenue: pd.DataFrame) -> pd.DataFrame:
     A year-ago revenue of zero or less gives NaN (growth is undefined).
     """
     check_consecutive(ticker, revenue)
+    columns = ["period_start", "period_end", "available_date", "revenue", "revenue_year_ago", "yoy"]
     frame = revenue.assign(_m=_months(revenue)).set_index("_m").sort_index()
-    rows = []
-    for month, row in frame.iterrows():
-        base = month - 12
-        if base not in frame.index:
-            continue
-        prior = float(frame.loc[base, "value"])
-        current = float(row["value"])
-        rows.append(
-            {
-                "period_start": base.start_time.date(),
-                "period_end": month.end_time.date(),
-                "available_date": max(row["available_date"], frame.loc[base, "available_date"]),
-                "revenue": current,
-                "revenue_year_ago": prior,
-                "yoy": current / prior - 1.0 if prior > 0 else float("nan"),
-            }
-        )
-    return pd.DataFrame(
-        rows,
-        columns=[
-            "period_start",
-            "period_end",
-            "available_date",
-            "revenue",
-            "revenue_year_ago",
-            "yoy",
-        ],
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+    full = frame.reindex(pd.period_range(frame.index.min(), frame.index.max(), freq="M"))
+    prior = full["value"].shift(12)
+    prior_available = full["available_date"].shift(12)
+    out = pd.DataFrame(
+        {
+            "period_start": [(m - 12).start_time.date() for m in full.index],
+            "period_end": [m.end_time.date() for m in full.index],
+            "available_date": [
+                max(a, b) if not pd.isna(b) else None
+                for a, b in zip(full["available_date"], prior_available, strict=True)
+            ],
+            "revenue": full["value"].astype(float),
+            "revenue_year_ago": prior.astype(float),
+        }
     )
+    out = out.loc[out["revenue_year_ago"].notna()]
+    out["yoy"] = out["revenue"] / out["revenue_year_ago"].where(out["revenue_year_ago"] > 0) - 1.0
+    return out[columns].reset_index(drop=True)
 
 
 def summarize_yoy(

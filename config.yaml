@@ -69,6 +69,39 @@ markets:
       # Median ratio of implied shares (net income / EPS) to capital / par must be within
       # this of 1; a wrong par value is off by a factor of 2 or more.
       share_count_tolerance: 0.10
+    industries:
+      # Industry = the exchange category from FinMind's listing data. These categories are
+      # boards or broad parents, not industries, and are ignored when a stock has others.
+      ignored_categories: [電子工業, 化學生技醫療, 創新板股票, 存託憑證]
+      # TWSE and TPEx spell some industries differently; peers are pooled under one name.
+      aliases:
+        其他電子類: 其他電子業
+        數位雲端類: 數位雲端
+        居家生活類: 居家生活
+        綠能環保類: 綠能環保
+        運動休閒類: 運動休閒
+        金融業: 金融保險
+        觀光事業: 觀光餐旅
+      # Stocks whose industry is ambiguous. Format: - { ticker: "1234", industry: "半導體業" }
+      overrides: []
+      # Industry groups used by framework rules (proposed defaults to review).
+      groups:
+        financial: [金融保險]
+        construction: [建材營造]
+        semiconductor: [半導體業]
+        mature_electronics: [電子零組件業, 電腦及週邊設備業, 光電業, 通信網路業, 電子通路業,
+                             資訊服務業, 其他電子業]
+        traditional: [水泥工業, 食品工業, 塑膠工業, 紡織纖維, 電機機械, 電器電纜, 化學工業,
+                      玻璃陶瓷, 造紙工業, 鋼鐵工業, 橡膠工業, 汽車工業, 航運業, 油電燃氣業,
+                      貿易百貨]
+        consumer_staples: [食品工業, 貿易百貨]
+        telecom: [通信網路業]
+      peers:
+        # Industry medians need at least this many peers with data in the window.
+        min_peers: 5
+        # Peer statements change only when a new quarter is published, so they are cached
+        # longer than the stock's own data (FinMind's quota makes a full industry slow).
+        cache_max_age_days: 7
     listing:
       # Emerging-board (興櫃) trading started on this date. FinMind and Yahoo include a
       # stock's emerging-board prices before its listing; those are out of scope (no price
@@ -170,6 +203,7 @@ frameworks:
     # "Keeps making new highs": at least one window-high month in this many recent months.
     new_high_lookback_months: 12
   warren_chou:
+    # Core EPS = operating income / shares (same share basis for both quarters).
     max_recent_quarter_eps_yoy_decline: 0.30
     reference_yield_range: [0.05, 0.06]
   guyu:
@@ -188,7 +222,7 @@ frameworks:
     preferred_industries: [financial, consumer_staples, telecom]
   buffett:
     roe_min: 0.15
-    # Spec says "below a threshold" without a value; 0.5 is a proposed default to review.
+    # Interest-bearing borrowings (short-term + long-term + bonds) / total equity.
     debt_to_equity_max: 0.5
     fcf_positive_year_ratio_min: 0.8
   graham:
