@@ -167,6 +167,9 @@ stability:
     annualized_return: 0.05
     annualized_volatility: 0.05
     dividend_yield: 0.01
+    # Proposed defaults to review: historical drawdown and one-day VaR are fractions too.
+    max_drawdown: 0.10
+    var: 0.01
   # Framework and composite scores (0-1 proportions).
   score_tolerance: 0.15
   alpha: 0.05

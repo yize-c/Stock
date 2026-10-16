@@ -9,6 +9,7 @@ valuation refer to.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 
 import pandas as pd
@@ -23,6 +24,7 @@ from stock_research.analysis.fundamentals import (
 from stock_research.analysis.peers import industry_medians
 from stock_research.analysis.revenue import yoy_table
 from stock_research.config import AppConfig
+from stock_research.data.adjustment import AdjustedPrices
 from stock_research.data.errors import DataValidationError
 from stock_research.data.market_data import MarketData
 from stock_research.data.shares import ShareBasis
@@ -73,6 +75,103 @@ def peer_tables(
     return out
 
 
+@dataclass(frozen=True)
+class StockData:
+    """Everything loaded for one stock at ``as_of``; windows only filter it."""
+
+    code: str
+    as_of: date
+    industry: str
+    groups: frozenset[str]
+    prices: AdjustedPrices
+    benchmark: pd.DataFrame
+    basis: ShareBasis
+    quarterly: pd.DataFrame
+    revenue: pd.DataFrame
+    revenue_yoy: pd.DataFrame
+    dividends: pd.DataFrame
+    peer_tables: dict[str, tuple[pd.DataFrame, pd.DataFrame] | Exception] | None
+    cpi_yoy: pd.DataFrame | None
+    cpi_problem: str | None
+
+
+def load_stock_data(
+    market_data: MarketData,
+    code: str,
+    as_of: date,
+    *,
+    with_peers: bool = True,
+    cpi_yoy: pd.DataFrame | None = None,
+    cpi_problem: str | None = CPI_UNAVAILABLE,
+    progress: Callable[[str], None] | None = None,
+) -> StockData:
+    ticker = market_data.resolve(code)
+    industry = market_data.industry(code)
+    revenue = market_data.monthly_revenue(ticker, as_of)
+    tables = None
+    if with_peers:
+        peers = market_data.peers(industry, exclude=code)
+        if progress:
+            progress(f"{industry}: loading {len(peers)} peer(s)")
+        tables = peer_tables(market_data, peers, as_of)
+    return StockData(
+        code=code,
+        as_of=as_of,
+        industry=industry,
+        groups=market_data.industry_groups(industry),
+        prices=market_data.prices(ticker, as_of),
+        benchmark=market_data.benchmark(as_of),
+        basis=market_data.share_basis(ticker, as_of),
+        quarterly=quarterly_table(market_data.financials(ticker, as_of), code),
+        revenue=revenue,
+        revenue_yoy=yoy_table(code, revenue),
+        dividends=market_data.dividends(ticker, as_of),
+        peer_tables=tables,
+        cpi_yoy=cpi_yoy,
+        cpi_problem=cpi_problem if cpi_yoy is None else None,
+    )
+
+
+def inputs_for(data: StockData, window: TimeWindow, config: AppConfig) -> FrameworkInputs:
+    """Framework inputs for any window (V1/V2/V3 or a V1 half), from data loaded once."""
+    basis_date = window.price_end
+    valuation, problem = None, None
+    try:
+        valuation = valuation_snapshot(
+            data.code, basis_date, data.prices.raw, data.quarterly, data.dividends, data.basis
+        )
+    except DataValidationError as exc:
+        problem = str(exc)
+    medians: PeerMedians | None = (
+        industry_medians(data.industry, data.peer_tables, window, config)
+        if data.peer_tables is not None
+        else None
+    )
+    return FrameworkInputs(
+        ticker=data.code,
+        window=window,
+        config=config,
+        industry=data.industry,
+        groups=data.groups,
+        quarterly=data.quarterly,
+        ttm=ttm_table(data.quarterly, data.basis, basis_date),
+        annual=annual_table(data.quarterly, data.basis, basis_date),
+        revenue=data.revenue,
+        revenue_yoy=data.revenue_yoy,
+        dividends=data.dividends,
+        raw_prices=data.prices.raw,
+        basis=data.basis,
+        valuation=valuation,
+        valuation_problem=problem,
+        valuation_history=valuation_history(
+            data.code, window, data.prices.raw, data.quarterly, data.dividends, data.basis
+        ),
+        peers=medians,
+        cpi_yoy=data.cpi_yoy,
+        cpi_problem=data.cpi_problem,
+    )
+
+
 def build_inputs(
     market_data: MarketData,
     config: AppConfig,
@@ -84,57 +183,17 @@ def build_inputs(
     cpi_problem: str | None = CPI_UNAVAILABLE,
     progress: Callable[[str], None] | None = None,
 ) -> dict[WindowName, FrameworkInputs]:
-    ticker = market_data.resolve(code)
-    industry = market_data.industry(code)
-    groups = market_data.industry_groups(industry)
-    prices = market_data.prices(ticker, as_of)
-    basis = market_data.share_basis(ticker, as_of)
-    quarterly = quarterly_table(market_data.financials(ticker, as_of), code)
-    revenue = market_data.monthly_revenue(ticker, as_of)
-    revenue_yoy = yoy_table(code, revenue)
-    dividends = market_data.dividends(ticker, as_of)
-
-    tables = None
-    if with_peers:
-        peers = market_data.peers(industry, exclude=code)
-        if progress:
-            progress(f"{industry}: loading {len(peers)} peer(s)")
-        tables = peer_tables(market_data, peers, as_of)
-
-    out: dict[WindowName, FrameworkInputs] = {}
-    for name, window in build_windows(config, as_of).items():
-        basis_date = window.price_end
-        valuation, problem = None, None
-        try:
-            valuation = valuation_snapshot(
-                code, basis_date, prices.raw, quarterly, dividends, basis
-            )
-        except DataValidationError as exc:
-            problem = str(exc)
-        medians: PeerMedians | None = (
-            industry_medians(industry, tables, window, config) if tables is not None else None
-        )
-        out[name] = FrameworkInputs(
-            ticker=code,
-            window=window,
-            config=config,
-            industry=industry,
-            groups=groups,
-            quarterly=quarterly,
-            ttm=ttm_table(quarterly, basis, basis_date),
-            annual=annual_table(quarterly, basis, basis_date),
-            revenue=revenue,
-            revenue_yoy=revenue_yoy,
-            dividends=dividends,
-            raw_prices=prices.raw,
-            basis=basis,
-            valuation=valuation,
-            valuation_problem=problem,
-            valuation_history=valuation_history(
-                code, window, prices.raw, quarterly, dividends, basis
-            ),
-            peers=medians,
-            cpi_yoy=cpi_yoy,
-            cpi_problem=cpi_problem if cpi_yoy is None else None,
-        )
-    return out
+    """Inputs for V1, V2 and V3."""
+    data = load_stock_data(
+        market_data,
+        code,
+        as_of,
+        with_peers=with_peers,
+        cpi_yoy=cpi_yoy,
+        cpi_problem=cpi_problem,
+        progress=progress,
+    )
+    return {
+        name: inputs_for(data, window, config)
+        for name, window in build_windows(config, as_of).items()
+    }

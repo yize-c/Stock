@@ -7,7 +7,15 @@ import pytest
 
 from stock_research.config import load_config
 from stock_research.data.errors import LookAheadError
-from stock_research.data.windows import TimeWindow, WindowName, build_window, build_windows
+from stock_research.data.windows import (
+    MAIN_WINDOWS,
+    TimeWindow,
+    WindowName,
+    build_window,
+    build_windows,
+    v1_halves,
+    v1_split_date,
+)
 from tests.conftest import DEFAULT_CONFIG
 
 CFG = load_config(DEFAULT_CONFIG)
@@ -30,7 +38,7 @@ def ttm(year: int, q: int) -> tuple[date, date]:
 
 
 def test_three_windows_built() -> None:
-    assert set(W) == set(WindowName)
+    assert set(W) == set(MAIN_WINDOWS)
     assert all(isinstance(w, TimeWindow) for w in W.values())
 
 
@@ -157,3 +165,24 @@ def test_historical_as_of_moves_v1_end_only() -> None:
 def test_invalid_period_rejected() -> None:
     with pytest.raises(ValueError):
         V1.contains_financial(date(2021, 3, 31), date(2021, 1, 1), date(2021, 5, 15))
+
+
+def test_v1_halves_split_at_the_midpoint() -> None:
+    as_of = date(2024, 1, 1)
+    early, late = v1_halves(CFG, as_of)
+    # 2020-01-01..2024-01-01 is 1461 days; the second half starts 731 days in.
+    assert v1_split_date(CFG, as_of) == date(2022, 1, 1)
+    assert (early.price_start, early.price_end) == (date(2020, 1, 1), date(2021, 12, 31))
+    assert (late.price_start, late.price_end) == (date(2022, 1, 1), as_of)
+    assert early.weight_reference_date == date(2021, 12, 31)
+    assert early.as_of == late.as_of == as_of
+    assert build_window(WindowName.POST_2020_EARLY, CFG, as_of) == early
+    assert build_window(WindowName.POST_2020_LATE, CFG, as_of) == late
+
+
+def test_fixed_internal_split(raw_config, write_config) -> None:
+    raw_config["stability"]["internal_split"] = {"mode": "fixed", "fixed_date": "2022-07-01"}
+    cfg = load_config(write_config(raw_config))
+    assert v1_split_date(cfg, date(2024, 1, 1)) == date(2022, 7, 1)
+    with pytest.raises(ValueError, match="outside V1"):
+        v1_split_date(cfg, date(2022, 1, 1))

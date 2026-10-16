@@ -8,8 +8,8 @@ tests whether those results held both before and after the 2020 pandemic regime 
 is used only to summarize filings and explain computed numbers. Every claim it makes must cite a
 source, and code checks that each citation is real.
 
-> **Status:** stage 5 of 11 (investor frameworks and composite score) done. Stability verdicts,
-> reports and the LLM layer are not implemented yet.
+> **Status:** stage 6 of 11 (stability verdicts and break detection) done. Reports, the CLI
+> `analyze` command and the LLM layer are not implemented yet.
 > Full requirements: [`docs/stock-research-prompt.md`](docs/stock-research-prompt.md) (Traditional Chinese).
 
 ## Data sources and known limitations
@@ -186,6 +186,21 @@ only if both months do (V1's first is January 2021).
 | VaR 95% | 5th percentile of daily returns, reported as a loss |
 
 Risk metrics are historical statistics over the stated dates, not probabilities.
+
+Implementation details:
+
+- Gaps: percentage points for ratios (per-metric `absolute_tolerance`), relative to the larger
+  magnitude for levels, `score_tolerance` for framework and composite scores, equality for
+  pass/fail items. A gap exactly at the tolerance counts as small; opposite signs never do.
+- Benjamini-Hochberg runs separately for step A, step B with the crash and step B without it.
+- Step B: V1 is unstable only when both the with-crash and without-crash comparisons are; it is
+  stable when either is; otherwise UNKNOWN (which makes an inconsistent metric UNSTABLE).
+  Framework items, scores and single-date valuation metrics have no crash-excluded variant.
+- Framework items in V1's halves usually lack the five fiscal years the year rule needs, so an
+  item that differs between V1 and V3 is usually UNSTABLE rather than REGIME_SHIFT.
+- `LOW_SAMPLE` marks single-date metrics and metrics with fewer than 8 observations in V1 or V3;
+  `ECON_ONLY` marks metrics without a test (or with too few observations for one).
+- HAC standard errors use the Newey-West lag rule `floor(4 (n / 100) ^ (2/9))`.
 
 A Quandt-Andrews sup-F test also reports the most likely break date. It is shown for information
 only and does not change the verdict.
