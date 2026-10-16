@@ -8,8 +8,8 @@ tests whether those results held both before and after the 2020 pandemic regime 
 is used only to summarize filings and explain computed numbers. Every claim it makes must cite a
 source, and code checks that each citation is real.
 
-> **Status:** stage 8 of 11 (Markdown reports and the `analyze` / `breakpoints` commands) done.
-> Claude Code settings (stage 9) and the validation tools (stage 10) are not implemented yet.
+> **Status:** stage 9 of 11 (Claude Code project settings: hooks, subagents, skill, `/analyze`)
+> done. The validation tools (stage 10) are not implemented yet.
 > Full requirements: [`docs/stock-research-prompt.md`](docs/stock-research-prompt.md) (Traditional Chinese).
 
 ## Data sources and known limitations
@@ -119,6 +119,24 @@ stock-research validation run point-in-time
 stock-research validation export-expert-forms
 stock-research validation score-experts
 ```
+
+## Claude Code settings
+
+`.claude/` holds the project settings for Claude Code:
+
+| Item | Purpose |
+|---|---|
+| `settings.json` | Allows pytest/ruff/uv sync; asks before `git push`, `uv add`, network tools and CLI commands that fetch data; denies reading `.env` |
+| `hooks/format_and_test.py` | After a Python edit: `ruff format` and the tests that import the module |
+| `hooks/guard_secrets.py` | Blocks `git commit` if the changes contain `.env`, a token value, or a key-shaped string |
+| `hooks/protect_forward_log.py` | Blocks changes to existing files in `validation/forward_log/` |
+| `agents/data-auditor.md` | Read-only audit of the data layer for look-ahead and missing checks |
+| `agents/report-reviewer.md` | Checks reports for predictions, advice, unverified claims and the disclaimer |
+| `agents/validation-reviewer.md` | Checks validation runs against `validation/preregistration.md` |
+| `skills/stock-analysis/SKILL.md` | Standard procedure for analyzing one stock |
+| `commands/analyze.md` | `/analyze <code>`: run the analysis, then the report reviewer |
+
+The hooks use only the Python standard library and are tested in `tests/test_hooks.py`.
 
 ## Configuration
 

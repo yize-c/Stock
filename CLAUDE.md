@@ -47,18 +47,18 @@
 ## 第 4 階段的做法（使用者已同意）
 - 每股數據用事件回溯調整（`data/shares.py`）：股數倍數 =（前一日收盤 − 現金股利）÷ 參考價，與「1 + 股票股利 ÷ 面額」交叉驗證；面額上櫃用櫃買官方值、上市預設 10 元（config）並隨面額變更事件調整；「普通股股本 ÷ 面額」與「歸屬母公司淨利 ÷ EPS」的股數比對不一致就報錯。只從 IFRS 起點（2013）開始調整。
 - 中央銀行網站（cbc.gov.tw）被雲端環境的網路政策擋下 → Sharpe 用 `markets.tw.risk_free.fallback_rates`，沒填滿版本期間就報錯。
-- （待使用者確認）月營收年增率：比較月與基期月都要在同一版本內（V1 第一個為 2021-01，V3 最後一個為 2019-12），與 TTM 規則一致。
+- 月營收年增率（使用者授權自行決定）：比較月與基期月都要在同一版本內（V1 第一個為 2021-01，V3 最後一個為 2019-12），與 TTM 規則一致。
 
 ## 第 5 階段的做法（使用者已同意）
 - CPI：使用者要開通主計總處網域；目前本 session 仍被網路政策擋下 → 華倫「年增率高於通膨」在沒有新高時判未通過，有新高時為「資料不足」，CPI fetcher 等能連線、取得真實回應後再寫。
 - 同產業中位數：抓同產業全部上市櫃普通股（不跳過；任一家抓取失敗 → 中位數不可用），同業財報快取 7 天（`markets.tw.industries.peers`）；產業別取最細分類，略過「電子工業」等大類，上市／上櫃不同寫法用 aliases 合併。
 - Buffett 負債權益比 = 有息負債（短借＋長借＋公司債）÷ 權益，門檻 0.5。
 - 華倫本業 EPS = 營業利益 ÷ 股數（同一股數基準），去年同期 ≤ 0 為不適用。
-- 產業群組（金融、營建、半導體、成熟電子、傳產、民生、電信）放 `markets.tw.industries.groups`，為待檢視的預設值。
+- 產業群組（金融、營建、半導體、成熟電子、傳產、民生、電信）放 `markets.tw.industries.groups`，使用者授權沿用此預設值。
 
 ## 第 6 階段的做法（使用者授權自行判斷）
 - 新增 scipy、statsmodels（使用者授權）。
-- 經濟差距：比率用百分點、一般數值用「差 ÷ 兩者絕對值較大者」、分數用 0.15、通過／未通過要相同；剛好等於容忍度算差距小。新增 `max_drawdown`（0.10）、`var`（0.01）的百分點容忍度（待檢視）。
+- 經濟差距：比率用百分點、一般數值用「差 ÷ 兩者絕對值較大者」、分數用 0.15、通過／未通過要相同；剛好等於容忍度算差距小。新增 `max_drawdown`（0.10）、`var`（0.01）的百分點容忍度（使用者授權沿用）。
 - BH 校正分三組：步驟 A、步驟 B 含崩跌、步驟 B 排除崩跌。
 - V1 內部：兩種算法都不穩定才不穩定；任一穩定就穩定；其餘為 UNKNOWN。框架項目、分數與估值時點值沒有「排除崩跌」版本。
 - V1 前後兩段多半湊不滿 5 個年度，框架項目在 V1 與 V3 不一致時通常判為 UNSTABLE（依規則表的 UNKNOWN → UNSTABLE）。
@@ -77,6 +77,15 @@
 - 報告欄位順序固定 V1、V3、V2（V2 只當參考）；`--compare` 另產生多檔比較表。
 - 技術指標只描述（高於／低於均線、RSI、MACD），並註明實證效果有爭議，不輸出訊號。
 - 外部參考連結（Goodinfo、Yahoo 奇摩股市、鉅亨網、MOPS）放 `report.reference_links`；重大事件名稱改中文。
+
+## 第 9 階段的做法（使用者授權自行判斷）
+- `.claude/settings.json`：允許 pytest、ruff、uv sync；git push、uv add、curl、WebFetch 與會連網的 `stock-research validate/analyze/breakpoints/validation` 需詢問；禁止讀 `.env`。
+- Hooks（`.claude/hooks/`，只用標準函式庫，測試在 `tests/test_hooks.py`）：
+  - `format_and_test.py`：編輯 Python 檔後跑 `ruff format` 與 import 該模組的測試，失敗回報給 Claude。
+  - `guard_secrets.py`：`git commit` 前掃描所有可能被提交的變更（含未追蹤檔），發現 `.env`、環境變數／`.env` 中 token 的值、或 Anthropic key／JWT 形狀字串就擋下。
+  - `protect_forward_log.py`：`validation/forward_log/` 已存在的檔案不可修改；shell 指令以該資料夾為寫入、搬移、刪除目標一律擋下（heredoc 內容不算）。
+- Subagents：`data-auditor`、`report-reviewer`、`validation-reviewer`（唯讀）；Skill `stock-analysis`；指令 `/analyze <代號>` 跑分析後交給 report-reviewer。
+- 保留期的執行限制在第 10 階段由程式檢查（`preregistration.md` 未 commit 就拒絕 `--phase holdout`）。
 
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |
