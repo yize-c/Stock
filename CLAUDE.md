@@ -97,6 +97,12 @@
 - FinMind 減資參考價從 2011 年開始，更早的減資（例：中華電 2008–2010）無法還原 → `markets.tw.price_history_overrides` 讓該股股價從最後一次缺資料的停牌後開始，並寫明原因。
 - `analyze` 在 as_of 為今天時寫入 `validation/forward_log/`（`--no-forward-log` 可關閉）。
 
+## 網頁 App（使用者決定）
+- 形式：PWA（Safari 加到主畫面），不是原生 iOS App；`web/` 為純 HTML/JS，不需建置，不計算任何數字。
+- 範圍：`app.watchlist` 約 50 支；每日由 GitHub Actions（台北 04:17，週一至週五）跑 `stock-research export`，部署到 GitHub Pages（repo 需公開，`FINMIND_TOKEN` 放 GitHub Secret）。
+- 每日匯出不抓同業（`app.with_peers: false`），需產業中位數的框架項目顯示為不可用。FinMind 請求上限調為每小時 550（免費版 600）。
+- 資料檢查未通過的股票照樣列出並顯示失敗項目，不用舊資料替代；資料超過 `app.stale_after_hours` 未更新時 App 顯示警告。
+
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |
 |---|---|---|---|

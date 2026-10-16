@@ -45,6 +45,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 "src/stock_research/llm/prompts.py" = ["E501"]
 "src/stock_research/report/*.py" = ["E501"]
 "src/stock_research/validation/report.py" = ["E501"]
+"src/stock_research/export/site.py" = ["E501"]
 "src/stock_research/validation/experts.py" = ["E501"]
 
 [tool.pytest.ini_options]

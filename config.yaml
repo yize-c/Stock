@@ -278,8 +278,8 @@ scoring:
 data_sources:
   cache_dir: .cache/stock_research
   finmind:
-    # Free tier allows a few hundred requests per hour; stay below it.
-    max_requests_per_hour: 300
+    # Free tier allows 600 requests per hour; stay below it.
+    max_requests_per_hour: 550
     # First date requested for daily series; each series starts where FinMind's data does
     # (stock prices from 1994, TAIEX closes and the trading calendar from 1999-01-05).
     history_start: 1990-01-01
@@ -405,3 +405,20 @@ validation:
   success:
     known_cases_accuracy: 0.80
     report_score_margin: 0.5
+
+app:
+  # Static web app (add to the iPhone home screen) fed by a daily batch export.
+  # The export analyses every stock below at today's date; stocks that fail the data checks
+  # are published with the failed checks, never with older data.
+  watchlist: [
+    "2330", "2317", "2454", "2308", "2382", "2303", "3711", "2357", "3231", "2376",
+    "3008", "2379", "3034", "2408", "3037", "2345", "6669", "3017", "2395", "6488",
+    "5347", "2412", "3045", "4904", "2881", "2882", "2891", "2886", "2892", "5880",
+    "2880", "2885", "2887", "2890", "1301", "1303", "1326", "6505", "2002", "1101",
+    "1216", "2912", "2207", "9910", "9921", "9917", "2603", "2609", "2615", "1476",
+  ]
+  # Industry medians need every peer's statements: too many requests for a daily run on
+  # FinMind's free tier, so framework items that need them show as unavailable.
+  with_peers: false
+  # A published dataset older than this is flagged as stale in the app.
+  stale_after_hours: 36

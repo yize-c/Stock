@@ -23,4 +23,5 @@ htmlcov/
 .cache/
 logs/
 reports/
+site/
 data/documents/

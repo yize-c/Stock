@@ -6,7 +6,7 @@ from stock_research.data.validation import HealthReport
 
 DISCLAIMER = "本工具僅供研究，不構成投資建議。"
 
-_CHECK_NAMES = {
+CHECK_NAMES = {
     "calendar": "交易日曆",
     "listing": "上市（櫃）資料",
     "listing.official_tpex": "上櫃日期與櫃買中心比對",
@@ -51,7 +51,7 @@ def render_health_report(report: HealthReport) -> str:
         lines.append(f"| {s.source} | {latest} | {fetched} |")
     lines += ["", "## 檢查項目", "", "| 項目 | 結果 | 說明 |", "|---|---|---|"]
     for c in report.checks:
-        name = _CHECK_NAMES.get(c.name, c.name)
+        name = CHECK_NAMES.get(c.name, c.name)
         lines.append(f"| {name} | {'通過' if c.passed else '失敗'} | {_cell(c.detail)} |")
     if report.issues:
         lines += ["", "## 需注意事項", ""]

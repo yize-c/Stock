@@ -40,6 +40,8 @@ WindowOption = typer.Option(
     None, "--window", help="Report a single window only (no stability verdicts)."
 )
 OutputDirOption = typer.Option(None, "--output-dir", help="Default: report.output_dir.")
+OutOption = typer.Option(Path("site"), "--out", help="Output folder (data/ is written inside).")
+CodesArgumentApp = typer.Argument(None, help="Stock codes (default: app.watchlist).")
 ForwardLogOption = typer.Option(
     True,
     "--forward-log/--no-forward-log",
@@ -198,6 +200,31 @@ def breakpoints(
             )
         else:
             typer.echo(f"{result.metric}: insufficient ({result.reason})")
+
+
+@app.command("export")
+def export(
+    out: Path = OutOption,
+    codes: list[str] | None = CodesArgumentApp,
+    config: Path = ConfigOption,
+) -> None:
+    """Analyse the app watchlist at today's date and write JSON for the web app."""
+    from stock_research.export.site import export_site
+
+    cfg = _load(config)
+    market_data = _open(cfg)
+    summary = export_site(
+        market_data, cfg, out, codes=[c.strip() for c in codes] if codes else None, progress=_echo
+    )
+    typer.echo(
+        f"as_of {summary.as_of}: {len(summary.ok)} ok, {len(summary.blocked)} blocked by data "
+        f"checks, {len(summary.errors)} errors"
+    )
+    for code, reason in {**summary.blocked, **summary.errors}.items():
+        typer.echo(f"  {code}: {reason}")
+    if not summary.ok:
+        typer.echo("no stock could be analysed; nothing should be published", err=True)
+        raise typer.Exit(code=1)
 
 
 # --- validation (spec §14) -------------------------------------------------------------------

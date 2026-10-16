@@ -124,6 +124,31 @@ uv run stock-research validation export-expert-forms 2330 2412    # blind forms 
 uv run stock-research validation score-experts validation/expert_forms/<date>
 ```
 
+## Web app (iPhone home screen)
+
+A static web app in `web/` shows the daily analysis of the watchlist (`app.watchlist` in
+`config.yaml`). Nothing is computed in the browser: `stock-research export` analyses every
+watchlist stock at today's date and writes `site/data/index.json` and
+`site/data/stocks/<code>.json`; the app only lays them out. Stocks that fail the data checks
+are listed with the failed checks, never with older data, and the app flags a dataset older
+than `app.stale_after_hours`.
+
+```bash
+uv run stock-research export --out site       # all watchlist stocks (about 10 FinMind requests each)
+uv run stock-research export 2330 2603 --out site
+cp -r web/. site/ && python -m http.server --directory site   # preview at http://localhost:8000
+```
+
+`.github/workflows/daily-export.yml` runs the export at 04:17 Taipei time on weekdays and
+deploys `site/` to GitHub Pages. One-time setup: make the repository public (free Pages), add
+the `FINMIND_TOKEN` repository secret, set Settings → Pages → Source to "GitHub Actions", and
+merge the workflow into the default branch (scheduled workflows only run there). On the
+iPhone, open the Pages URL in Safari → Share → Add to Home Screen.
+
+Industry peers are skipped in the daily export (`app.with_peers: false`): fetching every peer's
+statements does not fit FinMind's free tier, so framework items that need industry medians
+show as unavailable.
+
 ## Validation
 
 Code in `src/stock_research/validation/`, records in `validation/`:

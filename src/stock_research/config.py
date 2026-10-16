@@ -672,6 +672,21 @@ class ValidationConfig(_Model):
         return self
 
 
+# --- app export ---------------------------------------------------------------------------
+
+
+class AppExportConfig(_Model):
+    watchlist: list[Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]] = Field(min_length=1)
+    with_peers: bool
+    stale_after_hours: PositiveInt
+
+    @model_validator(mode="after")
+    def _unique(self) -> AppExportConfig:
+        if len(set(self.watchlist)) != len(self.watchlist):
+            raise ValueError("app.watchlist has duplicates")
+        return self
+
+
 # --- root ---------------------------------------------------------------------------------
 
 
@@ -688,6 +703,7 @@ class AppConfig(_Model):
     llm: LlmConfig
     report: ReportConfig
     validation: ValidationConfig
+    app: AppExportConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:
