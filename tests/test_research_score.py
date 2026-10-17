@@ -99,21 +99,60 @@ def test_risk_part_compares_with_the_benchmark() -> None:
     assert few.points is None
 
 
-def test_chips_part_from_flows_and_margin() -> None:
+def test_chips_part_from_streak_trust_holdings_and_margin() -> None:
+    """Spec v2 P2-11: institutional buying streak, trust holding change, margin use."""
     raw = pd.DataFrame({"date": DAYS, "volume": 1000.0})
     last = DAYS[-20:]
+
+    def rows(investor: str, buy: float, sell: float, days) -> list[dict]:
+        return [{"date": d, "investor": investor, "buy": buy, "sell": sell} for d in days]
+
     flows = pd.DataFrame(
-        [{"date": d, "investor": "Foreign_Investor", "buy": 60.0, "sell": 10.0} for d in last]
-        + [{"date": d, "investor": "Dealer_self", "buy": 0.0, "sell": 900.0} for d in last]
+        rows("Foreign_Investor", 60.0, 10.0, last)
+        + rows("Investment_Trust", 100.0, 0.0, last[-10:])
+        + rows("Dealer_self", 0.0, 900.0, last)
     )
     margin = pd.DataFrame({"date": [AS_OF], "balance": [10.0], "limit": [100.0]})
-    part = rs.chips_part(flows, margin, raw, AS_OF, SETTINGS.chips, 10)
-    # Net buying 5% of volume (dealers are not counted): 0.75; margin use 10% of 50%: 0.8.
-    assert part.points == pytest.approx(10 * (0.75 + 0.8) / 2)
-    no_margin = rs.chips_part(flows, margin.assign(limit=0.0), raw, AS_OF, SETTINGS.chips, 10)
-    assert no_margin.points == pytest.approx(7.5) and "不可融資" in no_margin.detail
-    nothing = rs.chips_part(flows.iloc[0:0], margin.iloc[0:0], raw, AS_OF, SETTINGS.chips, 10)
+    part = rs.chips_part(flows, margin, raw, 200_000.0, AS_OF, SETTINGS.chips, 10)
+    # 20 days of buying in a row (dealers are not counted): 1.0; the trust bought 1,000 shares
+    # = 0.5% of 200,000 (half of the 1% for full points): 0.75; margin use 10% of 50%: 0.8.
+    assert part.points == pytest.approx(10 * (1.0 + 0.75 + 0.8) / 3)
+    assert "連續買超 20 日" in part.detail and "+0.50%" in part.detail
+    no_shares = rs.chips_part(flows, margin, raw, None, AS_OF, SETTINGS.chips, 10)
+    assert no_shares.points == pytest.approx(10 * (1.0 + 0.8) / 2) and "股數" in no_shares.detail
+    no_margin = rs.chips_part(flows, margin.assign(limit=0.0), raw, None, AS_OF, SETTINGS.chips, 10)
+    assert no_margin.points == pytest.approx(10.0) and "不可融資" in no_margin.detail
+    nothing = rs.chips_part(flows.iloc[0:0], margin.iloc[0:0], raw, None, AS_OF, SETTINGS.chips, 10)
     assert nothing.points is None
+
+
+def test_streak_counts_same_sign_days_up_to_the_last() -> None:
+    assert rs._streak(pd.Series([1.0, 2.0, -1.0, -3.0])) == -2
+    assert rs._streak(pd.Series([-1.0, 4.0, 4.0, 4.0])) == 3
+    assert rs._streak(pd.Series([5.0, 0.0])) == 0  # no net trade on the last day
+    assert rs._streak(pd.Series([], dtype=float)) == 0
+
+
+def test_shares_outstanding_uses_the_latest_published_statement() -> None:
+    quarterly = pd.DataFrame(
+        {
+            "available_date": [date(2026, 3, 31), date(2026, 5, 15)],
+            "ordinary_share_capital": [1_000_000.0, 1_200_000.0],
+        },
+        index=[date(2025, 12, 31), date(2026, 3, 31)],
+    )
+    basis = SimpleNamespace(par_on=lambda day: 10.0)
+    assert rs.shares_outstanding(quarterly, basis, date(2026, 4, 30)) == 100_000.0
+    assert rs.shares_outstanding(quarterly, basis, date(2026, 6, 30)) == 120_000.0
+    assert rs.shares_outstanding(quarterly, basis, date(2026, 1, 1)) is None
+
+
+def test_chips_weight_is_capped(raw_config) -> None:
+    from stock_research.config import AppConfig
+
+    raw_config["research_score"]["points"].update(chips=20, principles=30)
+    with pytest.raises(ValueError, match="15%"):
+        AppConfig.model_validate(raw_config)
 
 
 def test_base_score_scales_available_parts_and_needs_enough_of_them() -> None:

@@ -331,6 +331,21 @@ function riskBody(s) {
   }).join("");
 }
 
+// Spec v2 P2-10: which of each investor's principles the stock meets, in words (V1).
+function principlesBody(list) {
+  const quoted = (names) => names.map((n) => `「${esc(n)}」`).join("");
+  const items = (list || []).map((f) => {
+    if (f.not_applicable) return `<li><strong>${esc(f.name)}</strong>：整個框架不適用（${esc(f.not_applicable)}）</li>`;
+    const parts = [];
+    if (f.passed.length) parts.push(`<span class="t-STABLE">符合 ${f.passed.length} 條</span>：${quoted(f.passed)}`);
+    if (f.failed.length) parts.push(`<span class="t-UNSTABLE">不符合 ${f.failed.length} 條</span>：${quoted(f.failed)}`);
+    if (f.unknown.length) parts.push(`<span class="muted">無法判斷</span>：${quoted(f.unknown)}`);
+    return `<li><strong>${esc(f.name)}</strong>：${parts.join("；") || "沒有計分條件"}</li>`;
+  });
+  return `<ul class="plain">${items.join("")}</ul>
+    <p class="small muted">只描述是否符合這些原則（程式依門檻判斷），不是買賣建議。</p>`;
+}
+
 function healthBody(health) {
   const rows = health.checks.map((c) => [esc(c.name), c.passed ? "通過" : '<strong class="t-error">失敗</strong>', c.passed ? "" : esc(c.detail)]);
   const limits = health.limitations.map((l) => `<li>${esc(l)}</li>`).join("");
@@ -349,6 +364,7 @@ function renderDetail(s) {
     ${drivers}
     <div class="sections">
       ${section("分數明細", scoreBody(s))}
+      ${section("白話解釋：符合哪些投資大師原則", principlesBody(s.principles))}
       ${section("穩定性指標（V1 vs V3）", metricsBody(s))}
       ${section("投資框架", frameworksBody(s))}
       ${section("風險指標（歷史統計值）", riskBody(s))}

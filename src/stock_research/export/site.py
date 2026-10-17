@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -49,6 +49,7 @@ from stock_research.report.analysis import (
     metric_value,
     num,
     pct,
+    principle_summary,
     render_analysis,
     sensitivity_note,
     walk_forward_note,
@@ -338,6 +339,7 @@ def stock_payload(
             "windows": WINDOW_NAMES,
             "metrics": _metrics(a),
             "walk_forward_note": walk_forward_note(a),
+            "principles": [asdict(p) for p in principle_summary(a)],
             "half_life_sensitivity": _sensitivity(a, config),
             "fundamentals": _fundamentals(a),
             "frameworks": _frameworks(a),

@@ -172,7 +172,8 @@ The score (spec v2 §4) has a base part that does not depend on capital: investo
 40 (the V1 framework composite), consistency 20 (V1/V3 agreement on the metrics whose
 walk-forward is positive), valuation 15 (today's exchange P/E and P/B as percentiles of the
 stock's own 10 years), risk 15 (3-year volatility and drawdown against the total-return
-index) and chips 10 (institutional net buying and margin use). Parts without data are left
+index) and chips 10 (the three institutional investors' buying or selling streak, the
+investment trust's change in holdings, and margin use). Parts without data are left
 out and the rest scaled to 100. Each capital tier (NT$50k, 300k, 1M, 3M) then multiplies the
 base score by a capital factor (trading-cost ratio, odd lots, concentration) and applies the
 calibration's cap.
@@ -192,6 +193,10 @@ half-life at 0.5x and 2x, and conclusions that change are listed (when the short
 longest half-life disagree, the conclusion may only reflect the post-2023 AI rally); and an
 in-sample result at least twice the out-of-sample one (the calibration's top-minus-bottom
 spread, or the walk-forward AUC above 0.5 against the holdout) raises an overfitting warning.
+
+Each stock's report and page also say, in plain words, which of each investor's principles
+the stock meets, misses or cannot be judged on (V1). The expert scoring lists every stock and
+question where the expert majority and the tool disagree (`disagreements.csv`).
 
 ## Official sources (probe)
 
