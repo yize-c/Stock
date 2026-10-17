@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 
 import pytest
@@ -170,7 +171,10 @@ def test_web_app_is_dark_only_and_cache_is_versioned() -> None:
     assert 'content="black-translucent"' in html
     manifest = json.loads((web / "manifest.webmanifest").read_text(encoding="utf-8"))
     assert manifest["background_color"] == manifest["theme_color"] == "#0a0a0b"
-    assert 'const CACHE = "stock-v2";' in (web / "sw.js").read_text(encoding="utf-8")
+    sw = (web / "sw.js").read_text(encoding="utf-8")
+    assert 'const CACHE = "stock-v3";' in sw  # bumped with the holdings scripts
+    for script in re.findall(r'<script src="([^"]+)"', html):
+        assert f'"{script}"' in sw  # every script is in the offline shell
     css = (web / "style.css").read_text(encoding="utf-8")
     assert "prefers-reduced-motion" in css and "--bg: #0a0a0b" in css
     assert "prefers-color-scheme" not in css  # one theme only
