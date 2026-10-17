@@ -61,54 +61,98 @@ def show(url: str, *, max_lines: int = 60, raw: int = 0) -> str:
 
 
 def closes() -> None:
-    print("##### official closes, March 2024")
-    for code in ("2412", "1216", "2603", "2382"):
-        status, _, text = fetch(
-            "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
-            f"?date=20240301&stockNo={code}&response=json"
-        )
-        print(f"=== TWSE STOCK_DAY {code} 2024-03 -> {status}")
-        try:
-            body = json.loads(text)
-            print("  fields:", body.get("fields"))
-            for row in body.get("data", [])[-8:]:
-                print("  ", row)
-        except ValueError:
-            print("  ", text[:200])
-    for url in (
+    print("##### official closes, March 2024 (second batch)")
+    status, _, text = fetch(
+        "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date=20240301&stockNo=9921&response=json"
+    )
+    print(f"=== TWSE STOCK_DAY 9921 2024-03 -> {status}")
+    try:
+        for row in json.loads(text).get("data", [])[-12:]:
+            print("  ", row[0], "close", row[6])
+    except ValueError:
+        print("  ", text[:200])
+    status, _, text = fetch(
         "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
-        "?code=6488&date=2024%2F03%2F01&response=json",
-        "https://www.tpex.org.tw/web/stock/aftertrading/daily_trading_info/st43_result.php"
-        "?l=zh-tw&d=113/03&stkno=6488",
-    ):
-        show(url, raw=3000)
+        "?code=5347&date=2024%2F03%2F01&response=json"
+    )
+    print(f"=== TPEx tradingStock 5347 2024-03 -> {status}")
+    try:
+        for row in json.loads(text)["tables"][0]["data"][-12:]:
+            print("  ", row[0], "close", row[6])
+    except (ValueError, KeyError, IndexError):
+        print("  ", text[:200])
+
+
+def opener() -> urllib.request.OpenerDirector:
+    """Follows redirects and keeps cookies (some issuer sites redirect through a cookie)."""
+    import http.cookiejar
+
+    return urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+    )
+
+
+def context(text: str, needle: str, width: int = 400, limit: int = 3) -> None:
+    start = 0
+    for _ in range(limit):
+        at = text.find(needle, start)
+        if at < 0:
+            return
+        print(f"  ...{needle} @{at}:", text[max(0, at - width // 2) : at + width // 2])
+        start = at + 1
 
 
 def etf_sources() -> None:
-    print("##### ETF holdings sources")
-    show("https://openapi.twse.com.tw/v1/swagger.json", raw=0, max_lines=0)
-    status, _, text = fetch("https://openapi.twse.com.tw/v1/swagger.json")
-    if status == 200:
-        spec = json.loads(text)
-        for path, ops in spec.get("paths", {}).items():
-            summary = " ".join(str(op.get("summary", "")) for op in ops.values())
-            if re.search(r"ETF|基金|受益|持股|成分", summary + path):
-                print("  openapi:", path, summary[:120])
+    print("##### Yuanta 0050")
+    _, _, page = fetch("https://www.yuantaetfs.com/product/detail/0050/ratio")
+    context(page, "台積電")
+    for link in sorted(set(re.findall(r"""href=["']([^"']+)["']""", page))):
+        if re.search(r"term|law|privacy|statement|declare|copyright|聲明|條款", link, re.I):
+            print("  footer link:", link)
+    scripts = sorted(set(re.findall(r"""src=["'](/_nuxt/[^"']+\.js)["']""", page)))
+    apis: set[str] = set()
+    for src in scripts:
+        _, _, js = fetch("https://www.yuantaetfs.com" + src)
+        apis |= set(re.findall(r"""["'`](/?api/[A-Za-z0-9_/.-]{2,80})""", js))
+        apis |= set(
+            re.findall(r"""["'`](https?://[a-z0-9.-]*yuanta[a-z0-9.-]*/[^"'`\s]{0,80})""", js)
+        )
+    for api in sorted(apis):
+        print("  api:", api)
+
+    print("##### TWSE ETF e-tianfu 00981A")
+    _, _, js = fetch("https://www.twse.com.tw/rsrc/sites/etfortune/js/etf-product.js")
+    for api in sorted(set(re.findall(r"""["'`](/zh/ETFortune/[A-Za-z]+)""", js))):
+        print("  ajax:", api)
+
+    print("##### Uni-President (ezmoney) 00981A")
+    browser = opener()
     for url in (
-        "https://www.twse.com.tw/zh/ETFortune/etfInfo/0050",
-        "https://www.twse.com.tw/zh/ETFortune/etfInfo/00981A",
-        "https://www.yuantaetfs.com/robots.txt",
-        "https://www.yuantaetfs.com/product/detail/0050/ratio",
-        "https://www.yuantaetfs.com/product/detail/0050/pcf",
-        "https://www.ezmoney.com.tw/robots.txt",
+        "https://www.ezmoney.com.tw/",
         "https://www.ezmoney.com.tw/ETF/Fund",
+        "https://www.ezmoney.com.tw/robots.txt",
     ):
-        show(url)
-    # Find 00981A's fund page on the issuer site from the ETF list.
-    _, _, page = fetch("https://www.ezmoney.com.tw/ETF/Fund")
-    pattern = r"""href=["']([^"']*00981A[^"']*|[^"']*fundCode=[^"']+)"""
-    for match in sorted(set(re.findall(pattern, page)))[:20]:
-        print("  ezmoney link:", match)
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            with browser.open(request, timeout=60) as response:
+                body = response.read().decode("utf-8", errors="replace")
+                print(f"=== {url} -> {response.status} final={response.geturl()} {len(body)} chars")
+                title = re.search(r"<title>(.*?)</title>", body, re.S)
+                print("  title:", " ".join(title.group(1).split())[:200] if title else None)
+                found = set(
+                    re.findall(r"""href=["']([^"']*(?:00981A|fundCode|FundCode)[^"']*)""", body)
+                )
+                for link in sorted(found)[:20]:
+                    print("  link:", link)
+                for link in sorted(set(re.findall(r"""href=["']([^"']+)["']""", body))):
+                    if re.search(r"term|privacy|statement|copyright|聲明|條款", link, re.I):
+                        print("  footer link:", link)
+                if url.endswith("robots.txt"):
+                    print(body[:500])
+        except urllib.error.HTTPError as exc:
+            print(f"=== {url} -> HTTP {exc.code} location={exc.headers.get('Location')}")
+        except Exception as exc:
+            print(f"=== {url} -> {type(exc).__name__}: {exc}")
 
 
 def main() -> int:
