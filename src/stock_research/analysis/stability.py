@@ -73,7 +73,7 @@ _TEST_FUNCTIONS: dict[StatTest, Callable[[Any, Any], float]] = {
 }
 # A gap exactly at the tolerance is "small"; this absorbs binary floating-point error
 # (0.75 - 0.6 = 0.15000000000000002).
-_FLOAT_SLACK = 1e-9
+FLOAT_SLACK = 1e-9
 SEVERITY = {Verdict.STABLE: 0, Verdict.REGIME_SHIFT: 1, Verdict.UNSTABLE: 2}
 
 
@@ -171,7 +171,7 @@ def economic_gap(spec: MetricSpec, a: Sample, b: Sample) -> Comparison:
         gap = abs(x - y) / scale if scale > 0 else 0.0
     else:
         gap = abs(x - y)
-    return Comparison(a, b, gap, gap <= spec.tolerance + _FLOAT_SLACK)
+    return Comparison(a, b, gap, gap <= spec.tolerance + FLOAT_SLACK)
 
 
 def _test_ready(spec: MetricSpec, a: Sample, b: Sample, config: StabilityConfig) -> bool:

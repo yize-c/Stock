@@ -17,6 +17,9 @@
   published (``passed`` false).
 * Group cutoffs for live scores: the median over out-of-sample months of each month's
   score quantiles.
+* Overfitting warning (spec v2 P1-9, default tier): the top-minus-bottom group spread in
+  sample is ``robustness.overfit_ratio`` times (or more) the out-of-sample spread, or the
+  in-sample spread is positive and the out-of-sample one is not. It only warns.
 
 Historical statistics only; not forecasts and not investment advice.
 """
@@ -36,7 +39,7 @@ from stock_research.calibration.pipeline import forward_gross, tier_net
 from stock_research.config import AppConfig, add_months
 from stock_research.data.errors import DataValidationError
 from stock_research.data.market_data import MarketData
-from stock_research.validation.statistics import block_bootstrap
+from stock_research.validation.statistics import block_bootstrap, overfit_check
 
 SCHEMA_VERSION = 1
 DISCLAIMER = (
@@ -170,6 +173,7 @@ def summarize(
             caps[key][str(entry["group"])] = {"cap": cap, "reason": reason}
 
     gate = _gate(table, str(score_settings.default_capital), config)
+    overfit = _overfit(table, str(score_settings.default_capital), config)
     oos = scored.loc[scored["period"] == "out_of_sample"]
     quantiles = np.arange(1, settings.groups) / settings.groups
     monthly = oos.groupby("base_date")["score"].quantile(quantiles).unstack()
@@ -197,6 +201,7 @@ def summarize(
         },
         "passed": gate["passed"],
         "gate": gate,
+        "overfit": overfit,
         "cutoffs": cutoffs,
         "table": table,
         "caps": caps,
@@ -239,6 +244,38 @@ def _gate(table: list[dict[str, Any]], tier: str, config: AppConfig) -> dict[str
         "bottom_mean": values[0],
         "rank_correlation": rho,
         "min_rank_correlation": settings.min_rank_correlation,
+    }
+
+
+def _spread(table: list[dict[str, Any]], period: str, tier: str) -> float | None:
+    low = table[0][period]["tiers"][tier]["mean"]
+    high = table[-1][period]["tiers"][tier]["mean"]
+    return None if low is None or high is None else high - low
+
+
+def _overfit(table: list[dict[str, Any]], tier: str, config: AppConfig) -> dict[str, Any]:
+    check = overfit_check(
+        _spread(table, "in_sample", tier),
+        _spread(table, "out_of_sample", tier),
+        config.robustness.overfit_ratio,
+    )
+    message = None
+    if check.warning and check.times is None:
+        message = (
+            f"樣本內最高分組比最低分組的歷史回測平均高 {check.in_sample:.1%}，"
+            f"樣本外沒有（{check.out_of_sample:+.1%}），可能過度擬合；以樣本外結果為準。"
+        )
+    elif check.warning:
+        message = (
+            f"樣本內最高與最低分組的歷史回測平均差距（{check.in_sample:.1%}）"
+            f"是樣本外（{check.out_of_sample:.1%}）的 {check.times:.1f} 倍，"
+            "可能過度擬合；以樣本外結果為準。"
+        )
+    return {
+        **check.as_dict(),
+        "tier": tier,
+        "measure": "最高分組減最低分組的歷史回測平均（扣成本）",
+        "message": message,
     }
 
 

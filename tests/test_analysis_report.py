@@ -181,3 +181,50 @@ def test_report_compares_returns_with_index_0050_and_deposits(analysis, config) 
     assert "報酬比較" in text and "0050（還原，扣 ETF 來回成本）" in text
     assert "扣一次來回成本，部位 NT$100,000" in text
     assert "一年期定存（期間平均）" in text
+
+
+def test_report_marks_half_life_sensitive_conclusions(analysis, config) -> None:
+    """Spec v2 P1-8: what moves under 0.5x / 2x half-lives is listed with the note."""
+    from dataclasses import replace
+
+    from stock_research.analysis.frameworks.base import Outcome
+    from stock_research.analysis.sensitivity import ItemSensitivity, ScoreSensitivity
+
+    s = analysis.sensitivity
+    moved = replace(
+        s,
+        composite=ScoreSensitivity({0.5: 0.8, 1.0: 0.6, 2.0: 0.5}, True, True),
+        items=[
+            ItemSensitivity(
+                "buffett", "roe", "ROE", {0.5: Outcome.PASS, 1.0: Outcome.FAIL, 2.0: Outcome.FAIL},
+                True,
+            ),
+            ItemSensitivity(
+                "graham", "pe", "本益比", {0.5: Outcome.PASS, 1.0: Outcome.FAIL, 2.0: Outcome.PASS},
+                False,
+            ),
+        ],
+    )  # fmt: skip
+    text = render_analysis(replace(analysis, sensitivity=moved), config)
+    section = text.split("### 半衰期敏感度（V1）")[1].split("## 6.")[0]
+    assert "| 綜合分數 | 80% | 60% | 50% | 可能只反映 2023 年後的 AI 多頭行情 |" in section
+    assert "| Warren Buffett：ROE | 通過 | 未通過 | 未通過 | 可能只反映" in section
+    assert "| Benjamin Graham：本益比 | 通過 | 未通過 | 通過 | 結論隨半衰期改變 |" in section
+    plain = render_analysis(analysis, config)
+    if not analysis.sensitivity.items:
+        assert "所有框架項目的通過／未通過在各半衰期下都相同。" in plain
+
+
+def test_report_says_which_metrics_count_for_consistency(analysis, config) -> None:
+    from dataclasses import replace
+
+    from stock_research.validation.metric_walk_forward import WalkForwardEvidence
+
+    evidence = WalkForwardEvidence(frozenset({"roe", "beta"}), frozenset({"roe"}), "開發期第 1 次")
+    text = render_analysis(replace(analysis, walk_forward=evidence), config)
+    assert (
+        "只採計 walk-forward 正向的指標" in text
+        and "ROE；walk-forward 未正向、不採計：Beta" in text
+    )
+    none = render_analysis(replace(analysis, walk_forward=None), config)
+    assert "尚無逐指標 walk-forward 結果" in none

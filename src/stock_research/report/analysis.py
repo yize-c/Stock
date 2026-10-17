@@ -185,6 +185,8 @@ def _stability(a: Analysis, only_unstable: bool) -> list[str]:
         "",
         f"V1 內部比較以 {split} 為切點（前段含 2020 年崩跌，另以排除崩跌的版本做敏感度檢查）。",
         "",
+        walk_forward_note(a),
+        "",
     ]
     rows = []
     for m in st.metrics:
@@ -234,6 +236,62 @@ def _stability(a: Analysis, only_unstable: bool) -> list[str]:
             )
         else:
             lines.append(f"- {b.metric}：資料不足（{b.reason}）")
+    return lines + [""]
+
+
+def walk_forward_note(a: Analysis) -> str:
+    """Which metrics' V1/V3 agreement counts toward the consistency part (v2 P1-7)."""
+    evidence = a.walk_forward
+    if evidence is None:
+        return "一致性分數（B 項）：尚無逐指標 walk-forward 結果，B 項不計分。"
+    names = {m.spec.key: m.spec.name for m in a.stability.metrics if m.spec.framework is None}
+    positive = "、".join(names.get(k, k) for k in sorted(evidence.positive)) or "無"
+    other = "、".join(names.get(k, k) for k in sorted(evidence.evaluated - evidence.positive))
+    return (
+        "一致性分數（B 項）只採計 walk-forward 正向的指標（V1／V3 一致且 walk-forward 正向才算一致）："
+        f"{positive}；walk-forward 未正向、不採計：{other or '無'}。"
+        f"依據：{evidence.source}，為樣本內結果。"
+    )
+
+
+def factor_label(factor: float) -> str:
+    return f"{factor:g} 倍"
+
+
+def sensitivity_note(recent: bool, config: AppConfig) -> str:
+    return config.robustness.recent_only_note if recent else "結論隨半衰期改變"
+
+
+def _sensitivity(a: Analysis, config: AppConfig) -> list[str]:
+    s = a.sensitivity
+    others = "、".join(factor_label(f) for f in s.multipliers if f != 1.0)
+    lines = [
+        "### 半衰期敏感度（V1）",
+        "",
+        f"所有半衰期另外乘上 {others} 重算 V1 框架（目前設定為 1 倍）。只有加權值會變；"
+        "數值指標的穩定性判定用未加權值，不受影響。",
+        "",
+    ]
+    headers = ["項目", *[factor_label(f) for f in s.multipliers], "說明"]
+    rows = []
+    scores = [("綜合分數", s.composite)] + [
+        (f"{FRAMEWORK_LABEL[name]}：框架分數", score) for name, score in s.frameworks.items()
+    ]
+    for label, score in scores:
+        if label == "綜合分數" or score.sensitive:
+            note = sensitivity_note(score.recent, config) if score.sensitive else "差距在容忍度內"
+            rows.append([label, *[pct(score.values[f], 0) for f in s.multipliers], note])
+    for item in s.items:
+        rows.append(
+            [
+                f"{FRAMEWORK_LABEL[item.framework]}：{item.name}",
+                *[OUTCOME_LABEL[item.outcomes[f].value] for f in s.multipliers],
+                sensitivity_note(item.recent, config),
+            ]
+        )
+    lines += table(headers, rows)
+    if not s.items:
+        lines += ["", "所有框架項目的通過／未通過在各半衰期下都相同。"]
     return lines + [""]
 
 
@@ -313,7 +371,9 @@ def _fundamentals(a: Analysis, shown: tuple[WindowName, ...], only_unstable: boo
     return lines
 
 
-def _scorecard(a: Analysis, shown: tuple[WindowName, ...], only_unstable: bool) -> list[str]:
+def _scorecard(
+    a: Analysis, shown: tuple[WindowName, ...], only_unstable: bool, config: AppConfig
+) -> list[str]:
     st = a.stability
     lines = ["## 5. 投資框架評分卡", ""]
     by_window = {w: {r.framework: r for r in st.framework_results[w]} for w in shown}
@@ -364,8 +424,10 @@ def _scorecard(a: Analysis, shown: tuple[WindowName, ...], only_unstable: bool) 
                 "；".join(c.notes),
             ]
         )
-    lines += table(["版本", "綜合", "只看台灣代表", "只看國外代表", "備註"], rows)
-    return lines + ["", SCORE_DISCLAIMER, ""]
+    lines += table(["版本", "綜合", "只看台灣代表", "只看國外代表", "備註"], rows) + [""]
+    if WindowName.POST_2020 in shown:
+        lines += _sensitivity(a, config)
+    return lines + [SCORE_DISCLAIMER, ""]
 
 
 def a_group(group: str, a: Analysis) -> list[str]:
@@ -580,7 +642,7 @@ def render_analysis(
     else:
         lines += ["## 3. 穩定性總覽", "", "單一版本模式：不做跨期穩定性判定。", ""]
     lines += _fundamentals(a, shown, only_unstable)
-    lines += _scorecard(a, shown, only_unstable)
+    lines += _scorecard(a, shown, only_unstable, config)
     lines += _risk(a, shown, config)
     lines += _qualitative(a)
     lines += _technicals(a)

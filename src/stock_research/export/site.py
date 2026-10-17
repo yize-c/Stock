@@ -45,10 +45,13 @@ from stock_research.report.analysis import (
     _metric_name,
     comparison_rows,
     cost_note,
+    factor_label,
     metric_value,
     num,
     pct,
     render_analysis,
+    sensitivity_note,
+    walk_forward_note,
 )
 from stock_research.report.health import ATTRIBUTION, CHECK_NAMES, DISCLAIMER
 from stock_research.validation.aspects import aspect_verdicts
@@ -144,6 +147,13 @@ def _gap_for(a: Analysis, key: str):
     return spec.gap if spec is not None else Gap.RELATIVE
 
 
+def _walk_forward(a: Analysis, key: str) -> str | None:
+    evidence = a.walk_forward
+    if evidence is None or key not in evidence.evaluated:
+        return None
+    return "正向" if key in evidence.positive else "未正向（不計入一致性分數）"
+
+
 def _metrics(a: Analysis) -> list[dict[str, Any]]:
     out = []
     for m in a.stability.metrics:
@@ -162,9 +172,49 @@ def _metrics(a: Analysis) -> list[dict[str, Any]]:
                     for w in COMPARE_ORDER
                 },
                 "note": m.step_a.note or None,
+                "walk_forward": _walk_forward(a, m.spec.key),
             }
         )
     return out
+
+
+def _sensitivity(a: Analysis, config: AppConfig) -> dict[str, Any]:
+    """V1 conclusions under other half-lives (v2 P1-8): the composite and what moved."""
+    s = a.sensitivity
+    rows = [
+        {
+            "name": f"{FRAMEWORK_LABEL[name]}：框架分數",
+            "values": [pct(score.values[f], 0) for f in s.multipliers],
+            "note": sensitivity_note(score.recent, config),
+        }
+        for name, score in s.frameworks.items()
+        if score.sensitive
+    ] + [
+        {
+            "name": f"{FRAMEWORK_LABEL[item.framework]}：{item.name}",
+            "values": [OUTCOME_LABEL[item.outcomes[f].value] for f in s.multipliers],
+            "note": sensitivity_note(item.recent, config),
+        }
+        for item in s.items
+    ]
+    return {
+        "multipliers": [factor_label(f) for f in s.multipliers],
+        "composite": {
+            "values": [pct(s.composite.values[f], 0) for f in s.multipliers],
+            "note": sensitivity_note(s.composite.recent, config) if s.composite.sensitive else None,
+        },
+        "rows": rows,
+    }
+
+
+def _composite_note(a: Analysis, config: AppConfig) -> str | None:
+    s = a.sensitivity.composite
+    if not s.sensitive:
+        return None
+    values = "／".join(
+        f"{factor_label(f)} {pct(s.values[f], 0)}" for f in a.sensitivity.multipliers
+    )
+    return f"投資大師原則（A 項）隨半衰期改變（{values}）：{sensitivity_note(s.recent, config)}"
 
 
 def _frameworks(a: Analysis) -> list[dict[str, Any]]:
@@ -255,6 +305,11 @@ def research_payload(
             "horizon_months": calibration["horizon_months"],
             "months": history["months"],
         },
+        "notes": [
+            n
+            for n in (_composite_note(a, config), (calibration.get("overfit") or {}).get("message"))
+            if n
+        ],
         "disclaimer": rs.DISCLAIMER,
     }
 
@@ -281,6 +336,8 @@ def stock_payload(
             "composite_notes": sorted({n for w in COMPARE_ORDER for n in st.composites[w].notes}),
             "windows": WINDOW_NAMES,
             "metrics": _metrics(a),
+            "walk_forward_note": walk_forward_note(a),
+            "half_life_sensitivity": _sensitivity(a, config),
             "fundamentals": _fundamentals(a),
             "frameworks": _frameworks(a),
             "risk": _risk(a, config),

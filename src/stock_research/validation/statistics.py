@@ -178,3 +178,36 @@ def wilson(successes: int, n: int, confidence: float) -> Interval:
     centre = (p + z * z / (2 * n)) / (1 + z * z / n)
     half = z * np.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / (1 + z * z / n)
     return Interval(p, float(max(0.0, centre - half)), float(min(1.0, centre + half)))
+
+
+@dataclass(frozen=True)
+class OverfitCheck:
+    """Spec v2 P1-9: is the in-sample effect ``threshold`` times (or more) the out-of-sample
+    one? Both effects are "larger is better, 0 is none" (a return spread, AUC - 0.5); an
+    in-sample effect with none out of sample is flagged too."""
+
+    in_sample: float | None
+    out_of_sample: float | None
+    times: float | None  # in_sample / out_of_sample when both are positive
+    threshold: float
+    warning: bool
+
+    def as_dict(self) -> dict[str, float | bool | None]:
+        return {
+            "in_sample": self.in_sample,
+            "out_of_sample": self.out_of_sample,
+            "times": self.times,
+            "threshold": self.threshold,
+            "warning": self.warning,
+        }
+
+
+def overfit_check(
+    in_sample: float | None, out_of_sample: float | None, threshold: float
+) -> OverfitCheck:
+    if in_sample is None or out_of_sample is None or in_sample <= 0:
+        return OverfitCheck(in_sample, out_of_sample, None, threshold, False)
+    if out_of_sample <= 0:
+        return OverfitCheck(in_sample, out_of_sample, None, threshold, True)
+    times = in_sample / out_of_sample
+    return OverfitCheck(in_sample, out_of_sample, times, threshold, times >= threshold)

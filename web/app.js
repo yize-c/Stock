@@ -232,12 +232,24 @@ function researchHTML(r) {
   ]);
   const notes = r.tiers.filter((t) => t.label_note).map((t) => `NT$${t.capital.toLocaleString("zh-TW")}：${esc(t.label_note)}`);
   const cal = r.calibration;
-  return `<p>基本分 ${r.base.toFixed(1)}，屬於第 ${r.group} 組（共 ${r.groups} 組，1 為最低）。各本金級距的分數 = 基本分 × 本金係數，再套用歷史校準上限。</p>
+  const warnings = (r.notes || []).map((n) => `<p class="warn">⚠️ ${esc(n)}</p>`).join("");
+  return `${warnings}<p>基本分 ${r.base.toFixed(1)}，屬於第 ${r.group} 組（共 ${r.groups} 組，1 為最低）。各本金級距的分數 = 基本分 × 本金係數，再套用歷史校準上限。</p>
     ${table(["本金級距", "分數", "本金係數", "來回成本占比", "上限", `第 ${r.group} 組歷史回測平均（${cal.horizon_months} 個月，扣成本）`, "同期 0050 / 定存"], rows)}
     ${notes.length ? `<p class="small muted">${notes.join("<br>")}</p>` : ""}
     ${table(["項目", "得分", "說明"], parts)}
     <p class="small muted">樣本外基準日 ${esc(cal.out_of_sample[0])}～${esc(cal.out_of_sample[1])}（${cal.months} 個月），資料至 ${esc(cal.data_as_of)}。歷史回測平均，不是預期報酬。</p>
     <p class="small"><strong>${esc(r.disclaimer)}</strong></p>`;
+}
+
+function sensitivityHTML(h) {
+  if (!h) return "";
+  const rows = [["綜合分數", ...h.composite.values, h.composite.note || "差距在容忍度內"]].concat(
+    h.rows.map((r) => [r.name, ...r.values, r.note])
+  );
+  const same = h.rows.length ? "" : `<p class="small muted">所有框架項目的通過／未通過在各半衰期下都相同。</p>`;
+  return `<h4>半衰期敏感度（V1）</h4>
+    <p class="small muted">所有半衰期乘上不同倍數重算 V1 框架（目前設定為 1 倍）。</p>
+    ${table(["項目", ...h.multipliers, "說明"], rows.map((r) => r.map(esc)))}${same}`;
 }
 
 function renderDetail(s) {
@@ -250,9 +262,14 @@ function renderDetail(s) {
     [["綜合分數", ...WINDOWS.map((w) => pct(s.composite[w]))]]
   );
   const metrics = table(
-    ["指標", "判定", ...WINDOWS],
-    s.metrics.map((m) => [esc(m.name), chip(m.verdict.code), ...WINDOWS.map((w) => esc(m.values[w]))])
-  );
+    ["指標", "判定", ...WINDOWS, "walk-forward"],
+    s.metrics.map((m) => [
+      esc(m.name),
+      chip(m.verdict.code),
+      ...WINDOWS.map((w) => esc(m.values[w])),
+      esc(m.walk_forward || "—"),
+    ])
+  ) + (s.walk_forward_note ? `<p class="small muted">${esc(s.walk_forward_note)}</p>` : "");
   const fundamentals = table(
     ["項目", ...WINDOWS],
     s.fundamentals.map((f) => [esc(f.name), ...WINDOWS.map((w) => esc(f.values[w]))])
@@ -268,7 +285,7 @@ function renderDetail(s) {
       return `<div class="fw"><strong>${esc(f.name)}</strong> ${f.stability ? chip(f.stability.code) : ""}
         <div class="small muted">${scores}</div>${na}${items}</div>`;
     })
-    .join("");
+    .join("") + sensitivityHTML(s.half_life_sensitivity);
   const risk = WINDOWS.map((w) => {
     const r = s.risk[w];
     if (!r.available) return `<p><strong>${WINDOW_LABEL[w]}</strong>：資料不足（${esc(r.reason)}）</p>`;

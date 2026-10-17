@@ -17,6 +17,7 @@ from stock_research.analysis.results import InsufficientHistory
 from stock_research.analysis.returns import ReturnComparison, compare_returns
 from stock_research.analysis.revenue import summarize_yoy
 from stock_research.analysis.risk import RiskMetrics, Sharpe, risk_metrics, sharpe_ratio
+from stock_research.analysis.sensitivity import HalfLifeSensitivity, half_life_sensitivity
 from stock_research.analysis.stability_inputs import StabilityReport, stability_report
 from stock_research.analysis.technicals import Technicals, technicals
 from stock_research.analysis.weighting import WeightedStat
@@ -33,6 +34,10 @@ from stock_research.llm.analysis import (
 )
 from stock_research.llm.client import LlmClient
 from stock_research.llm.documents import DocumentProblem, load_documents
+from stock_research.validation.metric_walk_forward import (
+    WalkForwardEvidence,
+    walk_forward_evidence,
+)
 
 # Fundamental columns shown with weighted and unweighted values (TTM, quarterly half-life).
 FUNDAMENTALS = (
@@ -78,6 +83,8 @@ class Analysis:
     health: HealthReport
     data: StockData
     stability: StabilityReport
+    sensitivity: HalfLifeSensitivity  # V1 frameworks under other half-lives (v2 P1-8)
+    walk_forward: WalkForwardEvidence | None  # per-metric walk-forward (v2 P1-7)
     risk: dict[WindowName, RiskMetrics | InsufficientHistory]
     sharpe: dict[WindowName, Sharpe | str]
     returns: dict[WindowName, ReturnComparison | InsufficientHistory]
@@ -214,6 +221,8 @@ def run_analysis(
         health=health,
         data=data,
         stability=stability,
+        sensitivity=half_life_sensitivity(data, config, stability),
+        walk_forward=walk_forward_evidence(config.research_score.consistency.walk_forward_results),
         risk=risk,
         sharpe=sharpe,
         returns=returns,

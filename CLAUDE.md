@@ -114,6 +114,11 @@
 - 規則改動記在 `calibration/CHANGELOG.md`；先前未執行過的「歷史回測參考」（`backtest`）已由本校準取代並移除。
 - 全市場校準時穩定性報告約 3 秒（估值歷史只算一次 TTM 表，結果與原本完全相同）。
 
+## 穩健性（v2 P1，第 4 階段）
+- P1-7 walk-forward 納入一致性：分數 B 項只採計 walk-forward 正向的指標（第 3 階段）；報告的穩定性總覽與網站指標表標出每個指標的 walk-forward 結果（正向／未正向）。穩定性判定本身不改（walk-forward 驗證的正是這些判定，改了會循環）。
+- P1-8 半衰期敏感度（`analysis/sensitivity.py`）：所有 `weighting.half_life_days` 乘上 `robustness.half_life_multipliers`（0.5、2）重算 V1 框架；加權只影響框架項目、框架分數、綜合分數（數值指標的穩定性判定用未加權值）。項目的通過／未通過不全相同，或分數全距 > `score_tolerance`，就列出；最短與最長半衰期的結論不同時標「可能只反映 2023 年後的 AI 多頭行情」（`robustness.recent_only_note`），只有 1 倍不同時標「結論隨半衰期改變」。只做 V1（V3 以 2019-12-31 為基準，與近年行情無關）。每檔約多 1 秒；校準不跑。
+- P1-9 過度擬合警示（`robustness.overfit_ratio` 2，`validation/statistics.py` 的 `overfit_check`）：校準 = 預設本金級距「最高組減最低組」的歷史回測平均，樣本內 ≥ 2 倍樣本外（或樣本內 > 0、樣本外 ≤ 0）就警告，寫進 `score_calibration.json` 並顯示在網站分數區；walk-forward = 保留期與 `preregistration.md` 選定的開發期嘗試比較 AUC − 0.5，寫進保留期報告（`preregistration.md` 須寫明「選定的調參嘗試編號：N」才可跑保留期）。只警告，不影響門檻或成功標準。
+
 ## v2（使用者 2026-10-17 的 v2 prompt 與決定）
 - 衝突處理選 **A**：允許依歷史回測的參考分數；本金調整由匯出程式預先算好各級距，JS 只切換顯示、不計算。
 - 校準股票池：全市場上市櫃普通股（含 FinMind `TaiwanStockDelisting` 已下市股），用 GitHub Actions 分批抓並快取；資料齊全前分數不上線。

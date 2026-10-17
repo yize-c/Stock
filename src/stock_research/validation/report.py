@@ -7,7 +7,7 @@ import pandas as pd
 from stock_research.validation.experts import ExpertScores
 from stock_research.validation.forward_log import ForwardComparison
 from stock_research.validation.known_cases import KnownCaseResult, confusion
-from stock_research.validation.statistics import Evaluation, Interval
+from stock_research.validation.statistics import Evaluation, Interval, OverfitCheck
 from stock_research.validation.walk_forward import WalkForwardRun
 
 NOT_PRICE = "成功標準不使用股價漲跌（spec §14.4）；後續變動是指標本身相對容忍度的變化。"
@@ -50,7 +50,33 @@ def _evaluation_lines(e: Evaluation, confidence: float) -> list[str]:
     ]
 
 
-def render_walk_forward(run: WalkForwardRun, confidence: float, attempts: int | None) -> str:
+def overfit_lines(check: OverfitCheck, selected_attempt: int) -> list[str]:
+    """Holdout vs the selected development attempt, on AUC - 0.5 (spec v2 P1-9)."""
+    lines = [
+        "## 過度擬合檢查",
+        "",
+        f"比較保留期與選定的開發期嘗試（第 {selected_attempt} 次）的工具 AUC − 0.5（高於隨機的部分）。"
+        f"開發期是保留期的 {check.threshold:g} 倍以上，或保留期沒有高於隨機時，發出警告。"
+        "只是警告，不改變成功標準。",
+        "",
+        f"- 開發期：{_num(check.in_sample)}；保留期：{_num(check.out_of_sample)}"
+        + (f"；倍數 {check.times:.2f}" if check.times is not None else ""),
+    ]
+    if check.in_sample is None or check.out_of_sample is None:
+        lines.append("- 無法比較（缺少開發期或保留期的 AUC）。")
+    elif check.warning:
+        lines.append("- **⚠️ 警告：開發期的結果明顯好於保留期，可能過度擬合；以保留期結果為準。**")
+    else:
+        lines.append("- 未達警示門檻。")
+    return lines + [""]
+
+
+def render_walk_forward(
+    run: WalkForwardRun,
+    confidence: float,
+    attempts: int | None,
+    overfit: tuple[OverfitCheck, int] | None = None,
+) -> str:
     phase = {"dev": "開發期", "holdout": "保留期"}[run.phase]
     first, last = run.base_dates[0], run.base_dates[-1]
     status = run.rows.drop_duplicates(["code", "base_date"])["status"].value_counts()
@@ -71,6 +97,7 @@ def render_walk_forward(run: WalkForwardRun, confidence: float, attempts: int | 
         "",
         *_evaluation_lines(run.evaluation, confidence),
         "",
+        *(overfit_lines(*overfit) if overfit is not None else []),
         "## 各股票 × 基準日的執行狀態",
         "",
         "| 狀態 | 次數 |",

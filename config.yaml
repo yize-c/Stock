@@ -664,3 +664,14 @@ calibration:
   shards: 30
   # Not common shares: ETFs/ETNs (00...), TDRs (91...).
   excluded_code_prefixes: ["0", "91"]
+
+robustness:
+  # Spec v2 P1-8: the V1 framework conclusions re-run with every weighting.half_life_days
+  # value scaled by these factors (the configured half-lives are the 1.0 run).
+  half_life_multipliers: [0.5, 2.0]
+  # Shown when a conclusion differs between the shortest and the longest half-life: it then
+  # depends on how much the most recent years count.
+  recent_only_note: 可能只反映 2023 年後的 AI 多頭行情
+  # Spec v2 P1-9: warn when an in-sample result is at least this many times the
+  # out-of-sample one (calibration: top-minus-bottom group spread; walk-forward: AUC - 0.5).
+  overfit_ratio: 2.0

@@ -888,6 +888,27 @@ class CalibrationConfig(_Model):
         return self
 
 
+class RobustnessConfig(_Model):
+    """Spec v2 P1: half-life sensitivity and the overfitting warning."""
+
+    # The V1 frameworks re-run with every half-life scaled by each of these (1.0, the
+    # configured half-lives, always runs and is not listed).
+    half_life_multipliers: Annotated[list[PositiveFloat], Field(min_length=1)]
+    # Shown when a conclusion differs between the shortest and the longest half-life.
+    recent_only_note: str
+    # An in-sample result at least this many times the out-of-sample one is flagged.
+    overfit_ratio: Annotated[float, Field(gt=1.0)]
+
+    @model_validator(mode="after")
+    def _check(self) -> RobustnessConfig:
+        factors = self.half_life_multipliers
+        if 1.0 in factors:
+            raise ValueError("half_life_multipliers must not list 1.0 (the base always runs)")
+        if factors != sorted(set(factors)):
+            raise ValueError("half_life_multipliers must be increasing and distinct")
+        return self
+
+
 class AppConfig(_Model):
     general: GeneralConfig
     markets: MarketsConfig
@@ -905,6 +926,7 @@ class AppConfig(_Model):
     costs: CostsConfig
     research_score: ResearchScoreConfig
     calibration: CalibrationConfig
+    robustness: RobustnessConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:

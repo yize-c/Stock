@@ -492,6 +492,10 @@ def test_holdout_blocked_until_preregistration_is_final_and_committed(repo) -> N
         check_holdout_allowed(directory, config)
     good = f"Status: FINAL\nConfig SHA-256: `{file_sha256(config)}`\n"
     _prereg(repo, good)
+    with pytest.raises(HoldoutBlocked, match="選定的調參嘗試編號"):
+        check_holdout_allowed(directory, config)
+    good += "- 選定的調參嘗試編號：3\n"
+    _prereg(repo, good)
     (directory / "preregistration.md").write_text(good + "edited\n")
     with pytest.raises(HoldoutBlocked, match="uncommitted"):
         check_holdout_allowed(directory, config)
@@ -501,7 +505,7 @@ def test_holdout_blocked_until_preregistration_is_final_and_committed(repo) -> N
         check_holdout_allowed(directory, config)
     _git(repo, "checkout", "config.yaml")
     registration = check_holdout_allowed(directory, config)
-    assert len(registration.commit) == 40
+    assert len(registration.commit) == 40 and registration.selected_attempt == 3
     acquire_holdout_lock(directory, registration, datetime(2026, 10, 16))
     with pytest.raises(HoldoutBlocked, match="only once"):
         check_holdout_allowed(directory, config)
@@ -881,3 +885,22 @@ def test_cli_forward_compare_and_experts(cli_env, tmp_path, report) -> None:
     result = runner.invoke(app, ["validation", "score-experts", str(folder), "--config", cli_env])
     assert result.exit_code == 0, result.output
     assert (folder / "scores.md").exists()
+
+
+def test_holdout_overfit_lines_and_logged_attempt_auc(tmp_path) -> None:
+    from stock_research.validation.report import overfit_lines
+    from stock_research.validation.statistics import overfit_check
+    from stock_research.validation.walk_forward import TUNING_LOG, attempt_auc
+
+    path = tmp_path / TUNING_LOG
+    path.parent.mkdir(parents=True)
+    path.write_text("attempt,tool_auc\n1,0.63\n2,\n", encoding="utf-8")
+    assert attempt_auc(tmp_path, 1) == pytest.approx(0.63)
+    assert attempt_auc(tmp_path, 2) is None and attempt_auc(tmp_path, 3) is None
+    assert attempt_auc(tmp_path / "missing", 1) is None
+    warned = "\n".join(overfit_lines(overfit_check(0.13, 0.05, 2.0), 1))
+    assert "第 1 次" in warned and "可能過度擬合" in warned and "2.60" in warned
+    fine = "\n".join(overfit_lines(overfit_check(0.13, 0.10, 2.0), 1))
+    assert "未達警示門檻" in fine
+    missing = "\n".join(overfit_lines(overfit_check(None, 0.10, 2.0), 1))
+    assert "無法比較" in missing

@@ -178,6 +178,13 @@ next-12-month return net of one round trip for the tier's position. Base dates f
 use them only. If the gate fails the score is not published. Rules are logged in
 `calibration/CHANGELOG.md`; the result is `calibration/score_calibration.json`.
 
+Robustness (spec v2 P1): the report and the site mark which metrics' walk-forward is positive
+(only those count toward the consistency part); the V1 frameworks are re-run with every
+half-life at 0.5x and 2x, and conclusions that change are listed (when the shortest and the
+longest half-life disagree, the conclusion may only reflect the post-2023 AI rally); and an
+in-sample result at least twice the out-of-sample one (the calibration's top-minus-bottom
+spread, or the walk-forward AUC above 0.5 against the holdout) raises an overfitting warning.
+
 ## Official sources (probe)
 
 The development environment cannot reach TWSE, MOPS, the central bank or DGBAS, but GitHub's
