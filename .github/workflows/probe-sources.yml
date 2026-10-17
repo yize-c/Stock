@@ -45,7 +45,7 @@ jobs:
       # Authority Information Access names, so verification succeeds with checking still on.
       - name: Tables (central-bank rates, CPI)
         run: |
-          pip install --quiet certifi xlrd
+          pip install --quiet certifi openpyxl
           curl -sSf -o twca.crt http://sslserver.twca.com.tw/cacert/Cyber_SSL_2023.crt
           openssl x509 -inform DER -in twca.crt -out twca.pem 2>/dev/null || cp twca.crt twca.pem
           cat "$(python -m certifi)" twca.pem > bundle.pem

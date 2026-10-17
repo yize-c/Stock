@@ -2,7 +2,7 @@
 
 Run by .github/workflows/probe-sources.yml after probe_sources.py. Reads:
 * the central bank's monthly history of the five largest banks' deposit and lending rates
-  (a13rate.xls; xlrd is installed in CI only, it is not a project dependency);
+  (a13rate.xls; openpyxl is installed in CI only, it is not a project dependency);
 * DGBAS's monthly CPI XML (pr0101a1m.xml).
 Read-only; prints sheet layouts and the first rows so parsers can be written from them.
 """
