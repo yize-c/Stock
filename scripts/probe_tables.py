@@ -24,7 +24,14 @@ def fetch(url: str) -> bytes:
         return response.read()
 
 
+# The five largest banks since November 2008 (the central bank's own definition); one sheet
+# each. Column 13 is the one-year time deposit, fixed rate (header rows 2-4 of every sheet).
+FIVE_BANKS = ("台銀", "土銀", "合庫", "一銀", "華銀")
+ONE_YEAR_FIXED = 13
+
+
 def show_rates(out: Path) -> None:
+    import calendar
     import io
 
     import openpyxl  # CI only; the file is xlsx despite its .xls name
@@ -33,20 +40,29 @@ def show_rates(out: Path) -> None:
     (out / "a13rate.xlsx").write_bytes(body)
     book = openpyxl.load_workbook(io.BytesIO(body), read_only=True, data_only=True)
     print("=== sheets:", [s.title for s in book.worksheets])
-    for sheet in book.worksheets:
-        rows = list(sheet.iter_rows(values_only=True))
-        title = str(rows[0][0]) if rows and rows[0] else ""
-        if "平均" not in sheet.title and "平均" not in title:
-            continue
-        print(f"=== sheet {sheet.title!r}: {len(rows)} rows; title {title!r}")
-        for i in range(min(5, len(rows))):
-            print(i, "|".join("" if v is None else str(v) for v in rows[i]))
-        # Year-month (ROC) and the one-year time deposit, fixed and floating (columns 13, 14),
-        # from ROC year 92 (2003) on.
+    by_month: dict[str, list[float]] = {}
+    for title in FIVE_BANKS:
+        rows = list(book[title].iter_rows(values_only=True))
+        print(f"=== {title} header:", "|".join("" if v is None else str(v) for v in rows[3]))
         for row in rows[5:]:
             month = "" if row[0] is None else str(row[0]).strip()
-            if month[:3].isdigit() and int(month[:3]) >= 92:
-                print(month, row[13], row[14], sep="|")
+            value = row[ONE_YEAR_FIXED] if len(row) > ONE_YEAR_FIXED else None
+            if month[:3].isdigit() and len(month) == 5 and int(month[:3]) >= 92 and value:
+                by_month.setdefault(month, []).append(float(value))
+    # Five-bank average per month, merged into periods of equal rate (percent, 4 decimals).
+    periods: list[list] = []
+    for month in sorted(by_month):
+        values = by_month[month]
+        average = round(sum(values) / len(values), 4)
+        label = (int(month[:3]) + 1911, int(month[3:]))
+        if periods and periods[-1][2] == average and periods[-1][3] == len(values):
+            periods[-1][1] = label
+        else:
+            periods.append([label, label, average, len(values)])
+    print(f"=== one-year fixed, five-bank average: {len(by_month)} months, {len(periods)} periods")
+    for (y0, m0), (y1, m1), average, banks in periods:
+        last = calendar.monthrange(y1, m1)[1]
+        print(f"RATE {y0}-{m0:02d}-01 {y1}-{m1:02d}-{last:02d} {average} banks={banks}")
 
 
 def show_cpi(out: Path) -> None:
