@@ -1,0 +1,25 @@
+name: Probe FinMind docs
+
+# Reads FinMind's public documentation index from a GitHub runner (the development
+# environment cannot reach it) and prints it. Read-only GET requests, no credentials.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/probe_finmind_docs.py
+      - .github/workflows/probe-docs.yml
+
+permissions:
+  contents: read
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: FinMind documentation
+        run: python scripts/probe_finmind_docs.py

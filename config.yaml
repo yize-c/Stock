@@ -110,135 +110,167 @@ markets:
       # Listing dates that cannot be derived from the data (a stock that first traded after
       # emerging_board_start and was listed before valuation_coverage_start).
       # Format: - { ticker: "1234", listing_date: 2004-03-15, source: "TWSE listing notice" }
+      # Verified against TWSE OpenAPI t187ap03_L (上市日期), fetched 2026-10-17 from a GitHub
+      # runner (scripts/probe_sources.py); the development environment cannot reach TWSE.
       overrides:
-        - ticker: "3231"
-          listing_date: 2003-08-19
-          source: >-
-            Wistron IPO on TWSE, Aug 2003 (public record); FinMind's first trade is
-            2003-08-19 with no earlier emerging-board trades, and TaiwanStockPER starts only
-            at its 2005-09-02 coverage start.
         - ticker: "2885"
           listing_date: 2002-02-04
-          source: >-
-            Yuanta FHC (formerly Fuhwa FHC) listed on formation by share swap; FinMind's first trade is 2002-02-04 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020204."
         - ticker: "2886"
           listing_date: 2002-02-04
-          source: >-
-            Mega FHC (formerly Chiao Tung FHC) listed on formation by share swap; FinMind's first trade is 2002-02-04 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020204."
         - ticker: "2887"
           listing_date: 2002-02-18
-          source: >-
-            Taishin FHC listed on formation by share swap; FinMind's first trade is 2002-02-18 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020218."
         - ticker: "2890"
           listing_date: 2002-05-09
-          source: >-
-            SinoPac FHC listed on formation by share swap; FinMind's first trade is 2002-05-09 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020509."
         - ticker: "2891"
           listing_date: 2002-05-17
-          source: >-
-            CTBC FHC (formerly Chinatrust FHC) listed on formation by share swap; FinMind's first trade is 2002-05-17 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020517."
         - ticker: "2892"
           listing_date: 2003-01-02
-          source: >-
-            First FHC listed on formation by share swap; FinMind's first trade is 2003-01-02 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20030102."
         - ticker: "3008"
           listing_date: 2002-03-11
-          source: >-
-            Largan listed on TWSE; FinMind's first trade is 2002-03-11 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020311."
         - ticker: "3017"
           listing_date: 2002-09-27
-          source: >-
-            Asia Vital Components listed on TWSE; FinMind's first trade is 2002-09-27 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020927."
         - ticker: "3034"
           listing_date: 2002-08-26
-          source: >-
-            Novatek listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020826."
         - ticker: "3037"
           listing_date: 2002-08-26
-          source: >-
-            Unimicron listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020826."
         - ticker: "3045"
           listing_date: 2002-08-26
-          source: >-
-            Taiwan Mobile listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020826."
+        - ticker: "3231"
+          listing_date: 2003-08-19
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20030819."
         - ticker: "4904"
-          listing_date: 2003-08-01
-          source: >-
-            Far EasTone listed on TWSE; FinMind's first trade is 2003-08-01 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          listing_date: 2005-08-24
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20050824. FinMind's earlier prices (from 2003-08-01) are not used."
         - ticker: "6505"
           listing_date: 2003-12-26
-          source: >-
-            Formosa Petrochemical listed on TWSE; FinMind's first trade is 2003-12-26 and
-            TaiwanStockPER starts only at its 2005-09-02 coverage start. A long-listed large
-            cap, not emerging-board trading.
-    # Prices before a capital change whose reference price is missing from FinMind cannot be
-    # adjusted; such a stock's prices start on the day trading resumed after the last one.
-    # Format: - { ticker: "1234", start: 2009-03-20, reason: "..." }
-    price_history_overrides:
-      - ticker: "2412"
-        start: 2010-02-08
-        reason: >-
-          Capital changes with trading halts in 2008 (2007-12-21 to 2008-01-08), 2009
-          (2009-03-03 to 2009-03-19) and 2010 (2010-01-21 to 2010-02-05) are missing from
-          TaiwanStockCapitalReductionReferencePrice (it starts with the 2011 reduction);
-          without reference prices the resumption days show false jumps (+13.9%, +19.3%).
-      - ticker: "2303"
-        start: 2007-10-09
-        reason: >-
-          Capital change: halted from 2007-09-20, resumed 2007-10-09 at +22.1% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
-      - ticker: "2357"
-        start: 2010-06-24
-        reason: >-
-          Pegatron spin-off: halted from 2010-05-18, resumed 2010-06-24 at +377% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
-      - ticker: "2379"
-        start: 2007-06-25
-        reason: >-
-          Capital change: halted from 2007-06-12, resumed 2007-06-25 at +102% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
-      - ticker: "2408"
-        start: 2009-08-26
-        reason: >-
-          Capital change: halted from 2009-08-13, resumed 2009-08-26 at +177% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
-      - ticker: "5347"
-        start: 2007-04-16
-        reason: >-
-          A capital change (halted from 2004-09-29, +78.9% on 2004-10-18) and unexplained limit breaches on 2005-07-08 (-8.3%) and 2007-04-14 (+9.2%); prices before the last breach are excluded. TaiwanStockCapitalReductionReferencePrice starts in 2011.
-      - ticker: "4904"
-        start: 2008-03-28
-        reason: >-
-          Capital change: halted from 2008-03-11, resumed 2008-03-28 at +24.4%, and an
-          unexplained -13.2% on 2004-08-12. TaiwanStockCapitalReductionReferencePrice starts
-          in 2011.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20031226."
+    # Unexplained multi-day halts before FinMind's capital-reduction coverage are detected
+    # automatically (data/early_changes.py). Use this only for other cases that make early
+    # prices unusable. Format: - { ticker: "1234", start: 2009-03-20, reason: "..." }
+    price_history_overrides: []
     benchmark:
       # Total-return index matches returns computed from dividend-adjusted prices.
       primary: TAIEX_TOTAL_RETURN
       # Used (and noted in the report) only if the total-return index is unavailable.
       fallback_ticker: "0050"
       fallback_uses_adjusted_prices: true
+      # Always shown next to the index (spec v2 P0-1): what a retail investor can actually
+      # buy. Dividend-adjusted, net of its own (ETF) round-trip cost.
+      compare_etf: "0050"
     risk_free:
       # One-year time deposit rate, averaged over each window. Source: Central Bank of
       # the Republic of China (Taiwan) statistics.
       source: cbc_one_year_deposit
-      # Per-period fallback rates if the CBC series cannot be fetched.
-      # Format: - { start: 2016-01-01, end: 2019-12-31, rate: 0.0104 }
-      # Left empty on purpose: fill in from CBC data before relying on the fallback.
-      # With no fallback, an unavailable CBC series raises an error.
-      fallback_rates: []
+      # The CBC file is read on every run where it is reachable (the GitHub runner; not this
+      # development environment). It must agree with fallback_rates where both have a rate;
+      # later months extend them.
+      cbc:
+        url: https://www.cbc.gov.tw/public/data/a13rate.xls
+        one_year_fixed_column: 13
+        start: 2003-01-01
+        members:
+          - { start: 2003-01-01, banks: [台銀, 合庫, 一銀, 華銀, 彰銀] }
+          - { start: 2008-11-01, banks: [台銀, 土銀, 合庫, 一銀, 華銀] }
+        cache_max_age_hours: 24
+      # The latest monthly rate may be reused for at most this many days after its month
+      # (the CBC publishes each month with a delay); the output says so. Beyond it: error.
+      carry_forward_max_days: 62
+      # Per-period rates (this environment cannot reach the CBC site). Values: the CBC's
+      # "五大銀行存放款利率歷史月資料" (https://www.cbc.gov.tw/public/data/a13rate.xls), the
+      # monthly mean of the five largest banks' one-year fixed time-deposit rate (column
+      # 一年期 固定). Members: 台銀, 合庫, 一銀, 華銀, 彰銀 until 2008-10; 台銀, 土銀, 合庫,
+      # 一銀, 華銀 from 2008-11 (the CBC's own definition). Read on a GitHub runner by
+      # scripts/probe_tables.py on 2026-10-17; equal consecutive months merged. Extend the
+      # list each month; a range not covered here raises an error.
+      fallback_rates:
+        - { start: 2003-01-01, end: 2003-04-30, rate: 0.0154 }
+        - { start: 2003-05-01, end: 2003-05-31, rate: 0.0153 }
+        - { start: 2003-06-01, end: 2003-06-30, rate: 0.01525 }
+        - { start: 2003-07-01, end: 2004-09-30, rate: 0.014 }
+        - { start: 2004-10-01, end: 2004-12-31, rate: 0.0152 }
+        - { start: 2005-01-01, end: 2005-02-28, rate: 0.01587 }
+        - { start: 2005-03-01, end: 2005-03-31, rate: 0.01684 }
+        - { start: 2005-04-01, end: 2005-06-30, rate: 0.01688 }
+        - { start: 2005-07-01, end: 2005-08-31, rate: 0.0179 }
+        - { start: 2005-09-01, end: 2005-11-30, rate: 0.0189 }
+        - { start: 2005-12-01, end: 2006-03-31, rate: 0.0199 }
+        - { start: 2006-04-01, end: 2006-06-30, rate: 0.0206 }
+        - { start: 2006-07-01, end: 2006-09-30, rate: 0.0213 }
+        - { start: 2006-10-01, end: 2006-12-31, rate: 0.022 }
+        - { start: 2007-01-01, end: 2007-03-31, rate: 0.0223 }
+        - { start: 2007-04-01, end: 2007-05-31, rate: 0.0226 }
+        - { start: 2007-06-01, end: 2007-08-31, rate: 0.02471 }
+        - { start: 2007-09-01, end: 2007-11-30, rate: 0.02541 }
+        - { start: 2007-12-01, end: 2008-03-31, rate: 0.02617 }
+        - { start: 2008-04-01, end: 2008-05-31, rate: 0.02659 }
+        - { start: 2008-06-01, end: 2008-06-30, rate: 0.02671 }
+        - { start: 2008-07-01, end: 2008-08-31, rate: 0.02719 }
+        - { start: 2008-09-01, end: 2008-09-30, rate: 0.02699 }
+        - { start: 2008-10-01, end: 2008-10-31, rate: 0.02501 }
+        - { start: 2008-11-01, end: 2008-11-30, rate: 0.02173 }
+        - { start: 2008-12-01, end: 2008-12-31, rate: 0.01421 }
+        - { start: 2009-01-01, end: 2009-01-31, rate: 0.00921 }
+        - { start: 2009-02-01, end: 2009-09-30, rate: 0.00771 }
+        - { start: 2009-10-01, end: 2010-05-31, rate: 0.00893 }
+        - { start: 2010-06-01, end: 2010-09-30, rate: 0.01018 }
+        - { start: 2010-10-01, end: 2010-12-31, rate: 0.01131 }
+        - { start: 2011-01-01, end: 2011-03-31, rate: 0.01188 }
+        - { start: 2011-04-01, end: 2011-06-30, rate: 0.01276 }
+        - { start: 2011-07-01, end: 2015-08-31, rate: 0.01355 }
+        - { start: 2015-09-01, end: 2015-11-30, rate: 0.01281 }
+        - { start: 2015-12-01, end: 2016-02-29, rate: 0.01205 }
+        - { start: 2016-03-01, end: 2016-06-30, rate: 0.01125 }
+        - { start: 2016-07-01, end: 2020-02-29, rate: 0.01039 }
+        - { start: 2020-03-01, end: 2022-02-28, rate: 0.00769 }
+        - { start: 2022-03-01, end: 2022-05-31, rate: 0.01039 }
+        - { start: 2022-06-01, end: 2022-08-31, rate: 0.01192 }
+        - { start: 2022-09-01, end: 2022-11-30, rate: 0.01325 }
+        - { start: 2022-12-01, end: 2023-02-28, rate: 0.0145 }
+        - { start: 2023-03-01, end: 2024-02-29, rate: 0.01575 }
+        - { start: 2024-03-01, end: 2026-09-30, rate: 0.017 }
     industry_classification: twse_tpex
     data_validation:
+      # Before FinMind's capital-reduction coverage, a halt of at least this many trading
+      # days followed by a close beyond the price limit (and no ex-rights event) is treated
+      # as an uncovered capital change: prices start on the resumption day.
+      min_halt_trading_days: 3
       # Raw-close cross-check between official, FinMind and yfinance.
       cross_source_tolerance: 0.005
+      # Yahoo closes found wrong against the official daily data (TWSE STOCK_DAY, TPEx
+      # tradingStock, read on a GitHub runner on 2026-10-17). These days are left out of the
+      # FinMind-vs-Yahoo comparison, and FinMind must equal official_close on them. Any other
+      # disagreement still fails.
+      known_source_errors:
+        - { source: yahoo, ticker: "2412", date: 2024-03-29, official_close: 126.0, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 127.0)" }
+        - { source: yahoo, ticker: "1216", date: 2024-03-29, official_close: 77.5, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 76.5)" }
+        - { source: yahoo, ticker: "2603", date: 2024-03-29, official_close: 172.0, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 175.0)" }
+        - { source: yahoo, ticker: "2382", date: 2024-03-29, official_close: 293.5, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 286.5)" }
+        - { source: yahoo, ticker: "6488", date: 2024-03-25, official_close: 582.0, evidence: "TPEx tradingStock 2024-03 (Yahoo 592.0)" }
+        - { source: yahoo, ticker: "6488", date: 2024-03-29, official_close: 580.0, evidence: "TPEx tradingStock 2024-03 (Yahoo 560.0)" }
+        - { source: yahoo, ticker: "9921", date: 2024-03-29, official_close: 217.5, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 220.5)" }
+        - { source: yahoo, ticker: "2317", date: 2024-03-29, official_close: 150.0, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 151.5)" }
+        - { source: yahoo, ticker: "2454", date: 2024-03-29, official_close: 1195.0, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 1185.0)" }
+        - { source: yahoo, ticker: "1101", date: 2024-03-29, official_close: 32.15, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 31.9)" }
+        - { source: yahoo, ticker: "5347", date: 2024-03-18, official_close: 84.8, evidence: "TPEx tradingStock 2024-03 (Yahoo 83.9)" }
+        - { source: yahoo, ticker: "5347", date: 2024-03-20, official_close: 89.7, evidence: "TPEx tradingStock 2024-03 (Yahoo 90.8, the 03-19 close)" }
+        - { source: yahoo, ticker: "5347", date: 2024-03-25, official_close: 86.3, evidence: "TPEx tradingStock 2024-03 (Yahoo 87.9, the 03-22 close)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-23, official_close: 108.0, evidence: "TPEx tradingStock 2024-09 (Yahoo 106.644, scaled before the 2024-10-01 rights issue)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-24, official_close: 107.0, evidence: "TPEx tradingStock 2024-09 (Yahoo 105.656, scaled before the 2024-10-01 rights issue)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-25, official_close: 106.5, evidence: "TPEx tradingStock 2024-09 (Yahoo 105.163, scaled before the 2024-10-01 rights issue)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-26, official_close: 105.0, evidence: "TPEx tradingStock 2024-09 (Yahoo 103.682, scaled before the 2024-10-01 rights issue)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-27, official_close: 103.0, evidence: "TPEx tradingStock 2024-09 (Yahoo 101.707, scaled before the 2024-10-01 rights issue)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-30, official_close: 103.5, evidence: "TPEx tradingStock 2024-09 (Yahoo 102.2, scaled before the 2024-10-01 rights issue)" }
       cross_source_lookback_trading_days: 60
       # |assets - (liabilities + equity)| / assets above this triggers a warning.
       balance_sheet_tolerance: 0.01
@@ -376,6 +408,8 @@ data_sources:
     # remaining stocks; interactive commands never wait.
     quota_retries: 2
     quota_wait_minutes: 20
+    # TaiwanStockCapitalReductionReferencePrice starts with 2011 events.
+    capital_reduction_coverage_start: 2011-01-01
     # First date requested for daily series; each series starts where FinMind's data does
     # (stock prices from 1994, TAIEX closes and the trading calendar from 1999-01-05).
     history_start: 1990-01-01
@@ -518,3 +552,36 @@ app:
   with_peers: false
   # A published dataset older than this is flagged as stale in the app.
   stale_after_hours: 36
+
+backtest:
+  # Historical backtest reference for the composite score (rule changed by the user on
+  # 2026-10-17; see CLAUDE.md core principle 4). Every value below was fixed before the first
+  # backtest ran. Changing them after seeing results must be recorded in backtest/CHANGELOG.md.
+  output: backtest/score_backtest.json
+  # First month-end base date (V1 needs some post-2020 statements before its score means much).
+  start: 2021-06-30
+  horizons_months: [3, 6, 12]
+  # Bucket edges for the V1 composite score: [0, 0.4), [0.4, 0.6), [0.6, 0.8), [0.8, 1].
+  score_bins: [0.4, 0.6, 0.8]
+  # Label rule: on this horizon, a bucket whose excess-return confidence interval lies wholly
+  # above 0 is 買進參考, wholly below 0 is 賣出參考, otherwise 持有參考. Buckets with fewer
+  # observations than min_bucket_observations get no label.
+  label_horizon_months: 6
+  min_bucket_observations: 30
+  confidence: 0.95
+  bootstrap_draws: 1000
+  seed: 20210630
+
+costs:
+  # Taiwan trading costs (spec v2 §3). Fees are charged on both the buy and the sell; the
+  # securities transaction tax only on the sell.
+  fee_rate: 0.001425
+  # Broker discount: 0.6 = 60% of the listed fee.
+  fee_discount: 1.0
+  # Minimum fee per order (NT$); some odd-lot brokers charge 1.
+  min_fee: 20
+  tax_stock: 0.003
+  tax_etf: 0.001
+  board_lot: 1000
+  # Position size (NT$) for cost-adjusted returns where no capital tier applies.
+  reference_position: 100000

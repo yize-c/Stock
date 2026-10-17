@@ -58,10 +58,6 @@ function chip(code, label) {
 function pct(value) {
   return value === null || value === undefined ? "N/A" : `${Math.round(value * 100)}%`;
 }
-function price(close) {
-  if (!close || close.value === null) return "";
-  return close.value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
-}
 function table(headers, rows) {
   const head = headers.map((h) => `<th>${esc(h)}</th>`).join("");
   const body = rows
@@ -133,9 +129,9 @@ function rowHTML(stock) {
   }
   return `<li><a class="row" href="#/s/${esc(stock.code)}">
     <div class="main"><div class="name">${esc(stock.code)} ${esc(stock.name)}</div>
-    <div class="sub">${esc(stock.industry)}・收盤 ${price(stock.close)}</div>
+    <div class="sub">${esc(stock.industry)}</div>
     <div class="minis">${aspectMini(stock)}</div></div>
-    <div class="right"><div class="small muted">V1 分數</div><div class="big-score">${pct(stock.composite_v1)}</div></div>
+    <div class="right"><div class="small muted">V1 分數</div><div class="big-score">${pct(stock.composite_v1)}</div>${stock.reference_label ? `<div class="small muted">回測：${esc(stock.reference_label)}</div>` : ""}</div>
     </a>${star}</li>`;
 }
 
@@ -201,6 +197,35 @@ function renderProblem(stock) {
     <p class="disclaimer">${(stock.disclaimer || []).map(esc).join("<br>")}</p>`;
 }
 
+// Historical backtest reference (CLAUDE.md core principle 4): labels come from the program's
+// fixed rule and are always shown with their statistics and caveats.
+const LABEL_CLASS = { "買進參考": "STABLE", "持有參考": "INSUFFICIENT", "賣出參考": "UNSTABLE" };
+function signedPct(value) {
+  if (value === null || value === undefined) return "—";
+  return `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
+}
+function backtestHTML(ref) {
+  if (!ref || !ref.available) {
+    return `<p class="small muted">${esc(ref ? ref.reason : "沒有歷史回測資料")}</p>`;
+  }
+  const rows = Object.entries(ref.horizons).map(([months, st]) => [
+    `${esc(months)} 個月`,
+    signedPct(st.mean),
+    st.n ? `${signedPct(st.ci_low)} ~ ${signedPct(st.ci_high)}` : "—",
+    st.hit_rate === null ? "—" : `${Math.round(st.hit_rate * 100)}%`,
+    String(st.n),
+    signedPct(ref.overall[months] ? ref.overall[months].mean : null),
+  ]);
+  const label = ref.label
+    ? `<span class="chip v-${LABEL_CLASS[ref.label]}">${esc(ref.label)}</span>`
+    : '<span class="chip v-INSUFFICIENT">不標示</span>';
+  return `<p>V1 綜合分數 ${pct(ref.score)}，屬於 ${pct(ref.bucket[0])}–${pct(ref.bucket[1])} 區間：${label}</p>
+    <p class="small muted">${esc(ref.label_reason)}。${esc(ref.rule)}</p>
+    ${table(["期間", "平均超額報酬", "信賴區間", "勝率", "樣本", "全部樣本平均"], rows)}
+    <p class="small muted">回測自 ${esc(ref.start)}，資料至 ${esc(ref.data_as_of)}，產生於 ${esc(ref.generated_at)}。超額報酬 = 相對加權報酬指數。</p>
+    <p class="small"><strong>${esc(ref.disclaimer)}</strong></p>`;
+}
+
 function renderDetail(s) {
   const aspects = Object.values(s.aspects)
     .map((a) => `<div>${esc(a.name)}<br>${chip(a.code)}</div>`)
@@ -241,12 +266,12 @@ function renderDetail(s) {
     <section class="card">
       <div class="small muted">${esc(s.market)}・${esc(s.industry)}・資料日期 ${esc(s.as_of)}</div>
       <div class="big">${esc(s.code)} ${esc(s.name)}</div>
-      <div>收盤 ${price(s.close)} <span class="small muted">（${esc(s.close.date)}，${esc(s.close.note)}）</span></div>
       <p>整體判定 ${chip(s.overall.code)}</p>
       <div class="aspects">${aspects}</div>
       ${drivers}
     </section>
     <section class="card">${composite}${s.composite_notes.length ? `<p class="small muted">${s.composite_notes.map(esc).join("<br>")}</p>` : ""}</section>
+    ${section("歷史回測參考（非投資建議）", backtestHTML(s.backtest_reference), true)}
     ${section("這些判定是什麼意思？", `<ul class="legend">${LEGEND.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`)}
     ${section("穩定性指標（V1 vs V3）", metrics, true)}
     ${section("基本面與月營收（未加權）", fundamentals)}

@@ -15,6 +15,7 @@ from stock_research.analysis.breakpoints import BreakResult
 from stock_research.analysis.frameworks.base import FrameworkResult, ItemKind, Outcome
 from stock_research.analysis.pipeline import FUNDAMENTALS, Analysis
 from stock_research.analysis.results import InsufficientHistory
+from stock_research.analysis.returns import ReturnComparison
 from stock_research.analysis.risk import RiskMetrics
 from stock_research.analysis.scoring import DISCLAIMER as SCORE_DISCLAIMER
 from stock_research.analysis.stability import Flag, Gap, Internal, MetricVerdict, Verdict
@@ -25,7 +26,7 @@ from stock_research.data.windows import MAIN_WINDOWS, WindowName
 from stock_research.llm.analysis import TaskStatus
 from stock_research.llm.verification import VerifiedClaim
 from stock_research.markets.tickers import to_yfinance_symbol
-from stock_research.report.health import DISCLAIMER, render_health_report
+from stock_research.report.health import ATTRIBUTION, DISCLAIMER, render_health_report
 
 WINDOW_LABEL = {
     WindowName.POST_2020: "V1（2020 後）",
@@ -392,7 +393,11 @@ def _item_cell(item) -> str:
     )
 
 
-def _risk(a: Analysis, shown: tuple[WindowName, ...]) -> list[str]:
+def cost_note(config: AppConfig) -> str:
+    return f"部位 NT${config.costs.reference_position:,.0f}"
+
+
+def _risk(a: Analysis, shown: tuple[WindowName, ...], config: AppConfig) -> list[str]:
     lines = ["## 6. 風險指標", "", "全部使用還原權息價格；基準為加權股價報酬指數（含息）。", ""]
     for w in shown:
         m = a.risk[w]
@@ -405,7 +410,7 @@ def _risk(a: Analysis, shown: tuple[WindowName, ...]) -> list[str]:
         recovered = dd.recovered or "尚未回到前高"
         sharpe = a.sharpe[w]
         sharpe_text = (
-            f"{sharpe.value:.2f}（無風險利率 {pct(sharpe.risk_free_rate)}，來源：config 分期設定值）"
+            f"{sharpe.value:.2f}（無風險利率 {pct(sharpe.risk_free_rate)}，來源：{sharpe.source}）"
             if not isinstance(sharpe, str)
             else f"無法計算：{sharpe}"
         )
@@ -427,7 +432,33 @@ def _risk(a: Analysis, shown: tuple[WindowName, ...]) -> list[str]:
         lines += table(["指標", f"數值（{label}）"], rows)
         events = "、".join(m.events_covered) or "無"
         lines += ["", f"涵蓋的重大事件：{events}", ""]
+        lines += [f"#### 報酬比較（{WINDOW_LABEL[w]}，年化，歷史統計值）", ""]
+        lines += table(["項目", "數值"], comparison_rows(a.returns[w], cost_note(config)))
+        lines.append("")
     return lines
+
+
+def comparison_rows(c, cost_note: str) -> list[list[str]]:
+    """Rows comparing the stock (net of one round trip) with the index, 0050 and deposits."""
+    if not isinstance(c, ReturnComparison):
+        return [["報酬比較", f"資料不足：{c.reason}"]]
+    etf = pct(c.etf) if c.etf is not None else f"無法取得（{c.etf_problem}）"
+    if c.risk_free is not None:
+        rf = pct(c.risk_free) + (f"（{c.risk_free_source}）" if c.risk_free_source else "")
+    else:
+        rf = f"無法取得（{c.risk_free_problem}）"
+    rows = [
+        ["期間", f"{c.start} 至 {c.end}（{c.years:.1f} 年）"],
+        ["個股年化報酬（未扣成本）", pct(c.stock_gross)],
+        [f"個股年化報酬（扣一次來回成本，{cost_note}）", pct(c.stock_net)],
+        ["加權報酬指數（含息）", pct(c.index)],
+        ["0050（還原，扣 ETF 來回成本）", etf],
+        ["一年期定存（期間平均）", rf],
+        ["相對加權報酬指數", pct(c.excess_vs_index)],
+    ]
+    if c.excess_vs_etf is not None:
+        rows.append(["相對 0050", pct(c.excess_vs_etf)])
+    return rows
 
 
 def _qualitative(a: Analysis) -> list[str]:
@@ -550,13 +581,13 @@ def render_analysis(
         lines += ["## 3. 穩定性總覽", "", "單一版本模式：不做跨期穩定性判定。", ""]
     lines += _fundamentals(a, shown, only_unstable)
     lines += _scorecard(a, shown, only_unstable)
-    lines += _risk(a, shown)
+    lines += _risk(a, shown, config)
     lines += _qualitative(a)
     lines += _technicals(a)
     lines += _links(a, config)
     lines += _sources(a)
     lines += _appendix(a)
-    lines += ["## 12. 免責聲明", "", DISCLAIMER, SCORE_DISCLAIMER, ""]
+    lines += ["## 12. 免責聲明", "", ATTRIBUTION, DISCLAIMER, SCORE_DISCLAIMER, ""]
     return "\n".join(lines)
 
 

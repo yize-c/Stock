@@ -13,9 +13,13 @@ quoted text and the rule it breaks.
 
 Check:
 
-1. **No predictions or advice.** No price forecasts, target prices, buy/sell/hold advice,
-   "上漲機率", "值得買進", "低估所以會漲", "建議", "可望", "預期將" about prices. Framework scores
-   and stability verdicts must read as descriptions, not recommendations. Technical indicators
+1. **No unsupported predictions or advice.** No target prices and no claims that a price will
+   rise or fall ("低估所以會漲", "可望", "預期將"). The one allowed exception is the
+   "歷史回測參考" section: buy/hold/sell reference labels and historical excess returns are
+   allowed only there, only as produced by the program's fixed rule, and only with sample
+   size, confidence interval, the survivorship note and "歷史回測統計值，不代表未來，不構成投資
+   建議". A label anywhere else, a label without those, or advice in LLM text is a FAIL.
+   Framework scores and stability verdicts must read as descriptions. Technical indicators
    only describe, carry the disputed-evidence note, and give no signals.
 2. **Historical labels.** Every risk metric (volatility, drawdown, VaR, beta, Sharpe) is called
    a historical statistic (歷史統計值), never a probability of the future.

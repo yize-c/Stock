@@ -15,7 +15,7 @@
 1. **數字由程式計算，LLM 只負責解讀。** LLM 不能自行產生股價、財務數字或比率。
 2. **Fail loudly**：資料沒抓到、過期或異常就明確報錯，不可靜默使用舊資料或預設值。
 3. LLM 的每個結論都要能追溯到來源，並由程式驗證引用真實存在。
-4. **不做股價預測**：不輸出漲跌預測、目標價、買賣建議、上漲機率。
+4. **不做無依據的股價預測**：不輸出目標價或漲跌斷言。例外（使用者 2026-10-17 修改規則）：「歷史回測參考」可依綜合分數區間顯示之後 3／6／12 個月的歷史超額報酬、勝率、樣本數、信賴區間，以及依 config 事先固定規則產生的「買進／持有／賣出參考」標示；只能由程式產生（LLM 不可），一律註明「歷史回測統計值，不代表未來，不構成投資建議」與倖存者偏差。
 5. 風險指標一律標註為「歷史統計值」，不是未來機率。
 6. **不偷看未來**：所有分析函式接受 `as_of`，只能看到 `available_date <= as_of` 的資料。
 7. 所有報告結尾附免責聲明：本工具僅供研究，不構成投資建議。
@@ -46,7 +46,7 @@
 
 ## 第 4 階段的做法（使用者已同意）
 - 每股數據用事件回溯調整（`data/shares.py`）：股數倍數 =（前一日收盤 − 現金股利）÷ 參考價，與「1 + 股票股利 ÷ 面額」交叉驗證；面額上櫃用櫃買官方值、上市預設 10 元（config）並隨面額變更事件調整；「普通股股本 ÷ 面額」與「歸屬母公司淨利 ÷ EPS」的股數比對不一致就報錯。只從 IFRS 起點（2013）開始調整。
-- 中央銀行網站（cbc.gov.tw）被雲端環境的網路政策擋下 → Sharpe 用 `markets.tw.risk_free.fallback_rates`，沒填滿版本期間就報錯。
+- 中央銀行網站（cbc.gov.tw）被雲端環境的網路政策擋下 → Sharpe 用 `markets.tw.risk_free.fallback_rates`，沒填滿版本期間就報錯。（v2 起已由 GitHub 探測填入，見「v2」一節）
 - 月營收年增率（使用者授權自行決定）：比較月與基期月都要在同一版本內（V1 第一個為 2021-01，V3 最後一個為 2019-12），與 TTM 規則一致。
 
 ## 第 5 階段的做法（使用者已同意）
@@ -94,16 +94,38 @@
 - 保留期防護：`preregistration.md` 已 commit、無修改、`Status: FINAL`、`Config SHA-256` 與已 commit 的 config 一致，且 `results/holdout_lock.json` 不存在；開始時寫入鎖檔。
 - 已知案例由 Claude 依公開資訊標註（使用者授權），待使用者或專家檢視；walk-forward 樣本是固定的 24 支股票，有倖存者偏差，需在結果中註明。
 - 第 10 階段跑真實資料時發現：跨來源比對原本只排除比對窗口內、配股前的日期，更早的日期會被補進窗口（9917 失敗）→ 改為排除最後一次股數基準變動前的所有日期。
-- FinMind 減資參考價從 2011 年開始，更早的減資（例：中華電 2008–2010）無法還原 → `markets.tw.price_history_overrides` 讓該股股價從最後一次缺資料的停牌後開始，並寫明原因。
+- FinMind 減資參考價從 2011 年開始，更早的減資（例：中華電 2008–2010）無法還原 → 程式自動偵測 2011 年前「無除權息事件、非已知停牌、連續 3 個交易日以上」的停牌，股價從最後一次復牌日開始，並寫進資料健康報告（`data/early_changes.py`）；結果與先前手動設定的 7 支完全一致，手動 override 已移除。其他特殊情況才用 `markets.tw.price_history_overrides`。
 - `analyze` 在 as_of 為今天時寫入 `validation/forward_log/`（`--no-forward-log` 可關閉）。
 
 ## 網頁 App（使用者決定）
 - 形式：PWA（Safari 加到主畫面），不是原生 iOS App；`web/` 為純 HTML/JS，不需建置，不計算任何數字。
 - 範圍：`app.watchlist` 約 50 支；每日由 GitHub Actions（台北 04:17，週一至週五）跑 `stock-research export`，部署到 GitHub Pages（repo 需公開，`FINMIND_TOKEN` 放 GitHub Secret）。
 - 每日匯出不抓同業（`app.with_peers: false`），需產業中位數的框架項目顯示為不可用。FinMind 請求上限調為每小時 550（免費版 600）。
-- 第一次全跑（50 支）：12 支需上市日 override（2002–2003 年才有首筆交易的金控與大型股）、6 支需股價起點 override（FinMind 缺 2011 年前的減資）；台新金（特別股）與台灣大（子公司持有庫藏股）的股數交叉驗證不一致，屬模型限制，換成彰銀、國巨。
+- 上市日 override 已用 GitHub runner 抓證交所 OpenAPI（t187ap03_L）核對：12 支一致，遠傳 4904 原設 2003-08-01（FinMind 首筆交易）錯誤，官方為 2005-08-24，已更正。證交所個股日成交只到 2010 年、減資資料只到 2011 年，無法補 2011 年前的減資。
+- 第一次全跑（50 支）：12 支需上市日 override（2002–2003 年才有首筆交易的金控與大型股）、6 支早年減資（現由程式自動偵測）；台新金（特別股）與台灣大（子公司持有庫藏股）的股數交叉驗證不一致，屬模型限制，換成彰銀、國巨。
 - 每日匯出遇到 FinMind 額度用完（402）會等待後重試（`quota_retries`、`quota_wait_minutes`），互動指令不等待。
 - 資料檢查未通過的股票照樣列出並顯示失敗項目，不用舊資料替代；資料超過 `app.stale_after_hours` 未更新時 App 顯示警告。
+
+## 歷史回測參考（使用者 2026-10-17 修改規則）
+- `stock-research backtest`：2021-06-30 起每個月底以當時資料算 V1 綜合分數，比較之後 3／6／12 個月相對報酬指數的超額報酬，依分數區間統計平均、勝率、樣本數、區塊自助法信賴區間（區塊 = 股票 × 年度）。
+- 標示規則寫在 `config.yaml` 的 `backtest`，回測前 commit；修改要記在 `backtest/CHANGELOG.md`。結果存 `backtest/score_backtest.json`，每日匯出把對應區間附在每支股票上。
+- 標示只能由程式產生，必須附統計、倖存者偏差說明與「歷史回測統計值，不代表未來，不構成投資建議」。穩定性判定的 walk-forward 驗證仍不以股價為成功標準，兩者分開。
+
+## v2（使用者 2026-10-17 的 v2 prompt 與決定）
+- 衝突處理選 **A**：允許依歷史回測的參考分數；本金調整由匯出程式預先算好各級距，JS 只切換顯示、不計算。
+- 校準股票池：全市場上市櫃普通股（含 FinMind `TaiwanStockDelisting` 已下市股），用 GitHub Actions 分批抓並快取；資料齊全前分數不上線。
+- 先前的「歷史回測參考」併入 v2 第四節（扣成本、十分位、樣本外、與 0050 比較；標示改為強／中／觀察／弱）。
+- 無風險利率：一年期定存固定利率的央行五大銀行月平均（`a13rate`；2008-10 前成員含彰銀、之後為土銀），config 存 2003-01 ~ 2026-09（45 期）。程式每次執行讀央行檔（`data/fetchers/cbc.py`，標準函式庫解析 xlsx），與 config 重疊處必須一致、之後的月份接上；讀不到（開發環境）就用 config 並註明。最新一期最多沿用 62 天（`carry_forward_max_days`，輸出會註明），超過或中間缺月就報錯（使用者決定）。
+- 交易成本：`costs`（手續費 0.1425% 雙邊、最低 20 元、證交稅股票 0.3%／ETF 0.1% 賣出），`analysis/costs.py`；報酬比較一律扣一次來回成本（參考部位 `costs.reference_position`）。
+- 0050：`markets.tw.benchmark.compare_etf`，還原並扣 ETF 來回成本，與加權報酬指數、一年期定存並列（`analysis/returns.py`）。
+- push：探測腳本（`scripts/probe_*.py` 與探測流程）可直接 push 到工作分支；其他 push 先問使用者。
+- token（使用者決定）：雲端容器沒有 `.env`，本機用雲端環境設定的環境變數、GitHub Actions 用 Secret；不印出、不寫進檔案或 commit。全市場校準用使用者另外申請的第二個免費 token（GitHub Secret `SECOND_FINMIND`），每日匯出仍用 `FINMIND_TOKEN`。
+- 公開網站（使用者決定，FinMind 條款：不可轉發原始資料、需標註 FinMind）：只放程式計算的結果（不放收盤價、金額等原始數字），網頁與報告附資料來源標註（`report/health.py` 的 `ATTRIBUTION`）。
+- 跨來源比對（walk-forward 69 次失敗的原因，使用者要求調查）：(1) 過去的 `as_of` 比對時，Yahoo 收盤已用今天以前的全部分割回溯調整 → 讀到今天並用 Yahoo 的分割倍數還原；(2) Yahoo 個別日期錯誤（多在 2024-03-29）→ 經證交所STOCK_DAY／櫃買 tradingStock 官方收盤確認後列入 `markets.tw.data_validation.known_source_errors`，該日不比對且 FinMind 必須等於官方收盤；清單外仍報錯。修正後 69 次全部通過。
+- 分數 B 項「walk-forward 正向」（使用者選 b）：以指標層級計算——該指標的 walk-forward AUC 高於隨機基準時，該指標的 V1／V3 一致才算數；目前只有開發期資料，需註明為樣本內結果。
+- ETF 資料來源（使用者：不用錢、不違法即可）：FinMind 主動式 ETF 持股需 Sponsor 付費、沒有指數型 ETF 成分股；元大官網 0050 持股頁公開列出股數與權重（使用條款未找到）；統一投信（00981A）條款禁止未經同意轉載；證交所 e添富需書面同意（開放資料平臺除外）。持股原始資料不可放上公開網站。
+- ETF 透視分數（使用者選 b）：持股只用來計算，網站只放算出的透視分數與覆蓋率，不放持股明細或權重。
+- PR（使用者 2026-10-17）：這批改動（v2 第 2 階段、網站、跨來源與央行利率）驗證完成後可自行開 PR 並 merge。
 
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |
@@ -166,6 +188,7 @@ uv run stock-research config show        # 驗證並顯示 config
 uv run stock-research validate 2330      # 資料驗證 + 資料健康報告（需 FINMIND_TOKEN）
 uv run stock-research analyze 2330       # 完整分析報告 → reports/2330_<as_of>.md
 uv run stock-research breakpoints 2330   # 結構斷點掃描（僅供參考）
+uv run stock-research backtest           # 綜合分數歷史回測參考 → backtest/score_backtest.json
 uv run stock-research validation run known-cases              # 已知案例測試
 uv run stock-research validation run walk-forward --phase dev # 開發期（每次都是一次調參嘗試）
 ```

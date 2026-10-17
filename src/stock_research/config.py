@@ -23,6 +23,7 @@ DEFAULT_CONFIG_PATH = Path("config.yaml")
 
 Fraction = Annotated[float, Field(ge=0.0, le=1.0)]
 PositiveInt = Annotated[int, Field(gt=0)]
+NonNegativeInt = Annotated[int, Field(ge=0)]
 PositiveFloat = Annotated[float, Field(gt=0.0)]
 
 _QUARTER_RE = re.compile(r"^\d{4}Q[1-4]$")
@@ -214,6 +215,7 @@ class TwBenchmarkConfig(_Model):
     primary: str
     fallback_ticker: str
     fallback_uses_adjusted_prices: bool
+    compare_etf: str
 
 
 class RiskFreeRate(_Model):
@@ -228,8 +230,26 @@ class RiskFreeRate(_Model):
         return self
 
 
+class CbcBankMembers(_Model):
+    """The CBC's five largest banks from ``start`` until the next entry's start."""
+
+    start: date
+    banks: Annotated[list[str], Field(min_length=1)]
+
+
+class CbcRatesConfig(_Model):
+    url: str
+    one_year_fixed_column: NonNegativeInt  # 0-based (column N = 13)
+    start: date
+    members: Annotated[list[CbcBankMembers], Field(min_length=1)]
+    cache_max_age_hours: PositiveInt
+
+
 class RiskFreeConfig(_Model):
     source: str
+    cbc: CbcRatesConfig
+    # Days after the last month with a rate that may reuse it (marked in the output).
+    carry_forward_max_days: NonNegativeInt
     fallback_rates: list[RiskFreeRate]
 
     @model_validator(mode="after")
@@ -241,8 +261,22 @@ class RiskFreeConfig(_Model):
         return self
 
 
+class KnownSourceError(_Model):
+    """A secondary source's close found wrong against the official TWSE/TPEx daily data."""
+
+    source: Literal["yahoo"]
+    ticker: Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]
+    date: date
+    official_close: PositiveFloat
+    evidence: str = Field(min_length=1)
+
+
 class DataValidationConfig(_Model):
+    # A halt of at least this many trading days before a beyond-limit close, earlier than
+    # FinMind's capital-reduction coverage, marks an uncovered capital change.
+    min_halt_trading_days: PositiveInt
     cross_source_tolerance: Fraction
+    known_source_errors: list[KnownSourceError]
     cross_source_lookback_trading_days: PositiveInt
     balance_sheet_tolerance: Fraction
     revenue_yoy_abs_max: PositiveFloat
@@ -486,6 +520,9 @@ class FinMindConfig(_Model):
     max_requests_per_hour: PositiveInt
     # Batch export only: on an exhausted quota (HTTP 402) wait this long and retry.
     quota_retries: Annotated[int, Field(ge=0)]
+    # First date of TaiwanStockCapitalReductionReferencePrice; earlier capital changes are
+    # detected from the prices instead (see data/early_changes.py).
+    capital_reduction_coverage_start: date
     quota_wait_minutes: PositiveFloat
     history_start: date
     price_history_start: date
@@ -690,6 +727,42 @@ class AppExportConfig(_Model):
         return self
 
 
+# --- backtest reference (user rule change 2026-10-17) ---------------------------------------
+
+
+class BacktestConfig(_Model):
+    output: Path
+    start: date
+    horizons_months: list[PositiveInt] = Field(min_length=1)
+    score_bins: list[Fraction] = Field(min_length=1)
+    label_horizon_months: PositiveInt
+    min_bucket_observations: PositiveInt
+    confidence: Annotated[float, Field(gt=0.5, lt=1.0)]
+    bootstrap_draws: PositiveInt
+    seed: int
+
+    @model_validator(mode="after")
+    def _consistent(self) -> BacktestConfig:
+        if self.score_bins != sorted(set(self.score_bins)):
+            raise ValueError("backtest.score_bins must be strictly increasing")
+        if self.label_horizon_months not in self.horizons_months:
+            raise ValueError("backtest.label_horizon_months must be one of horizons_months")
+        return self
+
+
+# --- trading costs (spec v2 §3) --------------------------------------------------------------
+
+
+class CostsConfig(_Model):
+    fee_rate: Fraction
+    fee_discount: Annotated[float, Field(gt=0.0, le=1.0)]
+    min_fee: Annotated[float, Field(ge=0.0)]
+    tax_stock: Fraction
+    tax_etf: Fraction
+    board_lot: PositiveInt
+    reference_position: PositiveFloat
+
+
 # --- root ---------------------------------------------------------------------------------
 
 
@@ -707,6 +780,8 @@ class AppConfig(_Model):
     report: ReportConfig
     validation: ValidationConfig
     app: AppExportConfig
+    backtest: BacktestConfig
+    costs: CostsConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:

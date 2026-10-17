@@ -7,7 +7,9 @@ description: Standard procedure for analyzing one Taiwan stock (TWSE/TPEx common
 
 The CLI computes every number. Your job is to run it, read the report, and explain it; never
 produce prices, ratios, forecasts, target prices or buy/sell advice yourself (CLAUDE.md core
-principles).
+principles). Buy/hold/sell reference labels exist only in the program's "歷史回測參考"
+section; report them as the program gives them, with their statistics and caveats, and never
+add a label of your own.
 
 ## Procedure
 

@@ -27,6 +27,7 @@ from stock_research.config import AppConfig
 from stock_research.data.adjustment import AdjustedPrices
 from stock_research.data.errors import DataValidationError
 from stock_research.data.market_data import MarketData
+from stock_research.data.risk_free import RiskFreeRates
 from stock_research.data.shares import ShareBasis
 from stock_research.data.windows import TimeWindow, WindowName, build_windows
 from stock_research.markets.tickers import Ticker
@@ -93,6 +94,7 @@ class StockData:
     peer_tables: dict[str, tuple[pd.DataFrame, pd.DataFrame] | Exception] | None
     cpi_yoy: pd.DataFrame | None
     cpi_problem: str | None
+    risk_free: RiskFreeRates | None = None  # None: the config's rates
 
 
 def load_stock_data(
@@ -129,6 +131,7 @@ def load_stock_data(
         peer_tables=tables,
         cpi_yoy=cpi_yoy,
         cpi_problem=cpi_problem if cpi_yoy is None else None,
+        risk_free=market_data.risk_free_rates(),
     )
 
 

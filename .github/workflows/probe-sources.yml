@@ -1,0 +1,57 @@
+name: Probe official sources
+
+# Fetches a few official endpoints (TWSE, MOPS, central bank, DGBAS) from a GitHub runner,
+# which is not behind the development environment's network policy, and prints what they
+# return. Read-only GET requests without credentials. Runs on demand or when the probe
+# script changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/probe_sources.py
+      - scripts/probe_tables.py
+      - .github/workflows/probe-sources.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Some government sites send incomplete certificate chains; certifi's bundle (CI only,
+      # not a project dependency) verifies them without disabling TLS verification.
+      - name: Probe
+        run: |
+          pip install --quiet certifi
+          SSL_CERT_FILE="$(python -m certifi)" python scripts/probe_sources.py probe
+      # DGBAS hosts fail certificate verification: show the chain and where the issuing
+      # certificate can be fetched (verification stays on; nothing is bypassed).
+      - name: Certificate chain of DGBAS hosts
+        run: |
+          for host in ws.dgbas.gov.tw www.stat.gov.tw; do
+            echo "=== $host"
+            echo | openssl s_client -connect "$host:443" -servername "$host" 2>/dev/null \
+              | sed -n '/Certificate chain/,/---/p'
+            echo | openssl s_client -connect "$host:443" -servername "$host" 2>/dev/null \
+              | openssl x509 -noout -subject -issuer -ext authorityInfoAccess || true
+          done
+      # DGBAS hosts omit the TWCA intermediate certificate; add the one their certificate's
+      # Authority Information Access names, so verification succeeds with checking still on.
+      - name: Tables (central-bank rates, CPI)
+        run: |
+          pip install --quiet certifi openpyxl
+          curl -sSf -o twca.crt http://sslserver.twca.com.tw/cacert/Cyber_SSL_2023.crt
+          openssl x509 -inform DER -in twca.crt -out twca.pem 2>/dev/null || cp twca.crt twca.pem
+          cat "$(python -m certifi)" twca.pem > bundle.pem
+          SSL_CERT_FILE="$PWD/bundle.pem" python scripts/probe_tables.py probe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-responses
+          path: probe
+          retention-days: 14

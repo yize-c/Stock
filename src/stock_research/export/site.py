@@ -27,6 +27,7 @@ from stock_research.analysis.scoring import DISCLAIMER as SCORE_DISCLAIMER
 from stock_research.analysis.stability import Gap
 from stock_research.analysis.technicals import DISPUTED
 from stock_research.analysis.weighting import WeightedStat
+from stock_research.backtest.score import load_summary, reference_for
 from stock_research.config import AppConfig
 from stock_research.data.errors import DataValidationError
 from stock_research.data.market_data import MarketData
@@ -41,12 +42,14 @@ from stock_research.report.analysis import (
     OUTCOME_LABEL,
     VERDICT_LABEL,
     _metric_name,
+    comparison_rows,
+    cost_note,
     metric_value,
     num,
     pct,
     render_analysis,
 )
-from stock_research.report.health import CHECK_NAMES, DISCLAIMER
+from stock_research.report.health import ATTRIBUTION, CHECK_NAMES, DISCLAIMER
 from stock_research.validation.aspects import aspect_verdicts
 
 SCHEMA_VERSION = 1
@@ -83,7 +86,7 @@ def _health(report: HealthReport) -> dict[str, Any]:
     }
 
 
-def _risk(a: Analysis) -> dict[str, Any]:
+def _risk(a: Analysis, config: AppConfig) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for window in COMPARE_ORDER:
         m = a.risk[window]
@@ -107,6 +110,7 @@ def _risk(a: Analysis) -> dict[str, Any]:
                 ["Sharpe", f"{sharpe.value:.2f}" if not isinstance(sharpe, str) else "無法計算"],
             ],
             "sharpe_note": sharpe if isinstance(sharpe, str) else None,
+            "comparison": comparison_rows(a.returns[window], cost_note(config)),
         }
     return out
 
@@ -190,10 +194,10 @@ def _frameworks(a: Analysis) -> list[dict[str, Any]]:
     return out
 
 
-def stock_payload(a: Analysis, config: AppConfig) -> dict[str, Any]:
+def stock_payload(
+    a: Analysis, config: AppConfig, backtest: dict[str, Any] | None = None
+) -> dict[str, Any]:
     st = a.stability
-    raw = a.data.prices.raw.dropna(subset=["close"])
-    last = raw.iloc[-1]
     names = {m.spec.key: _metric_name(m) for m in st.metrics}
     aspects = aspect_verdicts(st.metrics, config.validation)
     return _clean(
@@ -205,11 +209,6 @@ def stock_payload(a: Analysis, config: AppConfig) -> dict[str, Any]:
             "market": a.info.ticker.market.value,
             "industry": a.data.industry,
             "as_of": a.as_of,
-            "close": {
-                "value": float(last["close"]),
-                "date": last["date"],
-                "note": "原始收盤價（未還原）",
-            },
             "overall": _verdict(st.overall.verdict),
             "drivers": [names[k] for k in st.overall.drivers],
             "aspects": {k: {"name": ASPECT_NAMES[k], **_verdict(aspects[k])} for k in ASPECT_NAMES},
@@ -219,14 +218,17 @@ def stock_payload(a: Analysis, config: AppConfig) -> dict[str, Any]:
             "metrics": _metrics(a),
             "fundamentals": _fundamentals(a),
             "frameworks": _frameworks(a),
-            "risk": _risk(a),
+            "risk": _risk(a, config),
             "technicals": {
                 "note": DISPUTED,
                 "descriptions": list(a.technicals.descriptions) if a.technicals else [],
             },
             "health": _health(a.health),
+            "backtest_reference": reference_for(
+                st.composites[WindowName.POST_2020].score, backtest, config
+            ),
             "report_markdown": render_analysis(a, config),
-            "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER],
+            "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER, ATTRIBUTION],
         }
     )
 
@@ -256,6 +258,7 @@ def export_site(
 ) -> ExportSummary:
     as_of = market_data.today()
     summary = ExportSummary(as_of)
+    backtest = load_summary(config.backtest.output)
     rows = []
     for code in codes or config.app.watchlist:
         progress(f"{code}: analysing as of {as_of}")
@@ -276,7 +279,7 @@ def export_site(
                 "as_of": as_of,
                 "problem": row["problem"],
                 "health": _health(exc.report),
-                "disclaimer": [DISCLAIMER],
+                "disclaimer": [DISCLAIMER, ATTRIBUTION],
             }
             row["name"] = _name(market_data, code)
             payload["name"] = row["name"]
@@ -290,12 +293,17 @@ def export_site(
             _write(
                 out_dir / "data" / "stocks" / f"{code}.json",
                 _clean(
-                    {"schema": SCHEMA_VERSION, "as_of": as_of, **row, "disclaimer": [DISCLAIMER]}
+                    {
+                        "schema": SCHEMA_VERSION,
+                        "as_of": as_of,
+                        **row,
+                        "disclaimer": [DISCLAIMER, ATTRIBUTION],
+                    }
                 ),
             )
             rows.append(row)
             continue
-        payload = stock_payload(analysis, config)
+        payload = stock_payload(analysis, config, backtest)
         _write(out_dir / "data" / "stocks" / f"{code}.json", payload)
         summary.ok.append(code)
         rows.append(
@@ -304,10 +312,10 @@ def export_site(
                 "status": "ok",
                 "name": payload["name"],
                 "industry": payload["industry"],
-                "close": payload["close"],
                 "overall": payload["overall"],
                 "aspects": payload["aspects"],
                 "composite_v1": payload["composite"]["V1"],
+                "reference_label": payload["backtest_reference"].get("label"),
             }
         )
     _write(
@@ -319,7 +327,7 @@ def export_site(
                 "generated_at": market_data.now,
                 "stale_after_hours": config.app.stale_after_hours,
                 "stocks": rows,
-                "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER],
+                "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER, ATTRIBUTION],
             }
         ),
     )

@@ -54,6 +54,11 @@ Further limits found while building the data layer:
   until they cover the window.
 - **Trading halts for capital changes** (re-issuing shares after a reduction, split or par-value
   change) are derived from the event data and reported as expected gaps.
+- **Capital changes before 2011 are missing from FinMind.** A stock-specific halt of three or
+  more trading days before 2011 that no ex-rights event or known suspension explains (often
+  followed by a close beyond the price limit) means prices before it cannot be adjusted. The
+  price history then starts on the resumption day and the data-health report says so
+  (`data/early_changes.py`).
 
 ## Design principles
 
@@ -71,9 +76,13 @@ Further limits found while building the data layer:
 ## Non-goals
 
 - No automated trading or broker integration
-- No price predictions, target prices or buy/sell recommendations
+- No target prices and no claims that a price will rise or fall
+- Buy/hold/sell labels appear only as a **historical backtest reference** (rule changed by the
+  user on 2026-10-17): composite-score buckets backtested point-in-time, shown with mean excess
+  return, hit rate, sample size and confidence interval, labelled by a rule fixed in
+  `config.yaml` before the backtest ran. They are historical statistics, not advice
 - Framework scores and stability verdicts are descriptions, not recommendations
-- Validation never uses subsequent price moves as the measure of success
+- The stability-verdict validation never uses subsequent price moves as its measure of success
 
 ## Setup
 
@@ -148,6 +157,28 @@ iPhone, open the Pages URL in Safari → Share → Add to Home Screen.
 Industry peers are skipped in the daily export (`app.with_peers: false`): fetching every peer's
 statements does not fit FinMind's free tier, so framework items that need industry medians
 show as unavailable.
+
+## Historical backtest reference
+
+`stock-research backtest` computes, for every month end from 2021-06-30 and every watchlist
+stock, the V1 composite score from data available on that date, and the excess return over
+the TAIEX total-return index over the next 3, 6 and 12 months. Scores are grouped into buckets
+(`backtest.score_bins`); each bucket gets the mean excess return, hit rate, sample size and a
+block-bootstrap confidence interval (blocks = stock × year, since monthly base dates overlap).
+The reference label follows a rule fixed in `config.yaml` before the first run: on the 6-month
+horizon, an interval wholly above 0 is 買進參考, wholly below 0 is 賣出參考, otherwise 持有參考.
+Results go to `backtest/score_backtest.json`; rule changes are logged in
+`backtest/CHANGELOG.md`. The watchlist holds currently listed stocks only, so the history is
+survivorship-biased. These are historical statistics, not forecasts or advice.
+
+## Official sources (probe)
+
+The development environment cannot reach TWSE, MOPS, the central bank or DGBAS, but GitHub's
+runners can. `.github/workflows/probe-sources.yml` runs `scripts/probe_sources.py` (read-only
+GET requests, standard library) and prints status, content type and a preview of each
+response. So far it has verified the hand-set listing dates against TWSE's official
+`t187ap03_L` data and shown that TWSE's per-stock history starts in 2010 and its
+capital-reduction data in 2011.
 
 ## Validation
 

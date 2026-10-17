@@ -40,7 +40,10 @@ def test_export_writes_index_and_detail(config, tmp_path) -> None:
     assert row["status"] == "ok" and row["name"] and row["overall"]["code"]
     assert set(row["aspects"]) == {"revenue", "profitability", "risk"}
     detail = _read(tmp_path / "site" / "data" / "stocks" / "2330.json")
-    assert detail["close"]["note"] == "原始收盤價（未還原）"
+    # FinMind's terms: no raw data on the public site, and attribution on every page.
+    assert "close" not in detail and "close" not in row
+    assert any("FinMind" in line for line in detail["disclaimer"])
+    assert any("FinMind" in line for line in index["disclaimer"])
     assert detail["report_markdown"].startswith("# 2330")
     assert "本工具僅供研究，不構成投資建議。" in detail["disclaimer"]
     assert {f["key"] for f in detail["frameworks"]} >= {"buffett", "warren_chou"}
@@ -144,3 +147,30 @@ def test_web_app_files_exist() -> None:
     ):
         assert (web / name).is_file(), name
     assert "data/index.json" in (web / "app.js").read_text(encoding="utf-8")
+
+
+def test_export_attaches_the_backtest_reference(raw_config, write_config, tmp_path) -> None:
+    from datetime import datetime
+
+    from stock_research.backtest import score as bt
+    from tests.test_backtest import _run
+
+    raw_config["markets"]["tw"]["listing"]["overrides"] = [TSMC_LISTING]
+    raw_config["app"]["watchlist"] = ["2330"]
+    raw_config["backtest"]["output"] = str(tmp_path / "bt.json")
+    config = load_config(write_config(raw_config))
+    md, _ = build_market_data(config)
+    export_site(md, config, tmp_path / "a")
+    detail = _read(tmp_path / "a" / "data" / "stocks" / "2330.json")
+    assert detail["backtest_reference"]["available"] is False
+    run = _run()
+    bt.save(run, bt.summarize(run, config, datetime(2026, 10, 17)), config.backtest.output)
+    export_site(md, config, tmp_path / "b")
+    detail = _read(tmp_path / "b" / "data" / "stocks" / "2330.json")
+    ref = detail["backtest_reference"]
+    if detail["composite"]["V1"] is None:
+        assert ref["available"] is False
+    else:
+        assert ref["available"] and "倖存者偏差" in ref["disclaimer"]
+        index = _read(tmp_path / "b" / "data" / "index.json")
+        assert index["stocks"][0]["reference_label"] == ref["label"]
