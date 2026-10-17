@@ -696,6 +696,29 @@ class AppExportConfig(_Model):
         return self
 
 
+# --- backtest reference (user rule change 2026-10-17) ---------------------------------------
+
+
+class BacktestConfig(_Model):
+    output: Path
+    start: date
+    horizons_months: list[PositiveInt] = Field(min_length=1)
+    score_bins: list[Fraction] = Field(min_length=1)
+    label_horizon_months: PositiveInt
+    min_bucket_observations: PositiveInt
+    confidence: Annotated[float, Field(gt=0.5, lt=1.0)]
+    bootstrap_draws: PositiveInt
+    seed: int
+
+    @model_validator(mode="after")
+    def _consistent(self) -> BacktestConfig:
+        if self.score_bins != sorted(set(self.score_bins)):
+            raise ValueError("backtest.score_bins must be strictly increasing")
+        if self.label_horizon_months not in self.horizons_months:
+            raise ValueError("backtest.label_horizon_months must be one of horizons_months")
+        return self
+
+
 # --- root ---------------------------------------------------------------------------------
 
 
@@ -713,6 +736,7 @@ class AppConfig(_Model):
     report: ReportConfig
     validation: ValidationConfig
     app: AppExportConfig
+    backtest: BacktestConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:

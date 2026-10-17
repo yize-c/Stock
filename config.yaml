@@ -463,3 +463,22 @@ app:
   with_peers: false
   # A published dataset older than this is flagged as stale in the app.
   stale_after_hours: 36
+
+backtest:
+  # Historical backtest reference for the composite score (rule changed by the user on
+  # 2026-10-17; see CLAUDE.md core principle 4). Every value below was fixed before the first
+  # backtest ran. Changing them after seeing results must be recorded in backtest/CHANGELOG.md.
+  output: backtest/score_backtest.json
+  # First month-end base date (V1 needs some post-2020 statements before its score means much).
+  start: 2021-06-30
+  horizons_months: [3, 6, 12]
+  # Bucket edges for the V1 composite score: [0, 0.4), [0.4, 0.6), [0.6, 0.8), [0.8, 1].
+  score_bins: [0.4, 0.6, 0.8]
+  # Label rule: on this horizon, a bucket whose excess-return confidence interval lies wholly
+  # above 0 is 買進參考, wholly below 0 is 賣出參考, otherwise 持有參考. Buckets with fewer
+  # observations than min_bucket_observations get no label.
+  label_horizon_months: 6
+  min_bucket_observations: 30
+  confidence: 0.95
+  bootstrap_draws: 1000
+  seed: 20210630

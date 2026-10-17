@@ -27,6 +27,7 @@ from stock_research.analysis.scoring import DISCLAIMER as SCORE_DISCLAIMER
 from stock_research.analysis.stability import Gap
 from stock_research.analysis.technicals import DISPUTED
 from stock_research.analysis.weighting import WeightedStat
+from stock_research.backtest.score import load_summary, reference_for
 from stock_research.config import AppConfig
 from stock_research.data.errors import DataValidationError
 from stock_research.data.market_data import MarketData
@@ -190,7 +191,9 @@ def _frameworks(a: Analysis) -> list[dict[str, Any]]:
     return out
 
 
-def stock_payload(a: Analysis, config: AppConfig) -> dict[str, Any]:
+def stock_payload(
+    a: Analysis, config: AppConfig, backtest: dict[str, Any] | None = None
+) -> dict[str, Any]:
     st = a.stability
     raw = a.data.prices.raw.dropna(subset=["close"])
     last = raw.iloc[-1]
@@ -225,6 +228,9 @@ def stock_payload(a: Analysis, config: AppConfig) -> dict[str, Any]:
                 "descriptions": list(a.technicals.descriptions) if a.technicals else [],
             },
             "health": _health(a.health),
+            "backtest_reference": reference_for(
+                st.composites[WindowName.POST_2020].score, backtest, config
+            ),
             "report_markdown": render_analysis(a, config),
             "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER],
         }
@@ -256,6 +262,7 @@ def export_site(
 ) -> ExportSummary:
     as_of = market_data.today()
     summary = ExportSummary(as_of)
+    backtest = load_summary(config.backtest.output)
     rows = []
     for code in codes or config.app.watchlist:
         progress(f"{code}: analysing as of {as_of}")
@@ -295,7 +302,7 @@ def export_site(
             )
             rows.append(row)
             continue
-        payload = stock_payload(analysis, config)
+        payload = stock_payload(analysis, config, backtest)
         _write(out_dir / "data" / "stocks" / f"{code}.json", payload)
         summary.ok.append(code)
         rows.append(
@@ -308,6 +315,7 @@ def export_site(
                 "overall": payload["overall"],
                 "aspects": payload["aspects"],
                 "composite_v1": payload["composite"]["V1"],
+                "reference_label": payload["backtest_reference"].get("label"),
             }
         )
     _write(

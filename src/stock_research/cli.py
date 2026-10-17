@@ -227,6 +227,33 @@ def export(
         raise typer.Exit(code=1)
 
 
+@app.command("backtest")
+def backtest(
+    codes: list[str] | None = CodesArgumentApp,
+    config: Path = ConfigOption,
+) -> None:
+    """Backtest the V1 composite score against later excess returns (historical reference)."""
+    from stock_research.backtest.score import run_backtest, save, summarize
+
+    cfg = _load(config)
+    market_data = _open(cfg, batch=True)
+    run = run_backtest(
+        market_data, cfg, codes=[c.strip() for c in codes] if codes else None, progress=_echo
+    )
+    summary = summarize(run, cfg, market_data.now)
+    save(run, summary, cfg.backtest.output)
+    typer.echo(f"data as of {summary['data_as_of']}; {summary['scored_rows']} scored rows")
+    for code, reason in run.excluded.items():
+        typer.echo(f"  excluded {code}: {reason}")
+    for b in summary["buckets"]:
+        parts = []
+        for months, st in b["horizons"].items():
+            mean = "—" if st["mean"] is None else f"{st['mean']:+.2%}"
+            parts.append(f"{months}m {mean} (n={st['n']})")
+        typer.echo(f"  [{b['low']:.0%}, {b['high']:.0%}) {b['label'] or '—'}: " + "; ".join(parts))
+    typer.echo(f"written: {cfg.backtest.output}")
+
+
 # --- validation (spec §14) -------------------------------------------------------------------
 
 validation_app = typer.Typer(help="Validate the tool itself (spec §14).", no_args_is_help=True)

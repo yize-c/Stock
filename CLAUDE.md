@@ -15,7 +15,7 @@
 1. **數字由程式計算，LLM 只負責解讀。** LLM 不能自行產生股價、財務數字或比率。
 2. **Fail loudly**：資料沒抓到、過期或異常就明確報錯，不可靜默使用舊資料或預設值。
 3. LLM 的每個結論都要能追溯到來源，並由程式驗證引用真實存在。
-4. **不做股價預測**：不輸出漲跌預測、目標價、買賣建議、上漲機率。
+4. **不做無依據的股價預測**：不輸出目標價或漲跌斷言。例外（使用者 2026-10-17 修改規則）：「歷史回測參考」可依綜合分數區間顯示之後 3／6／12 個月的歷史超額報酬、勝率、樣本數、信賴區間，以及依 config 事先固定規則產生的「買進／持有／賣出參考」標示；只能由程式產生（LLM 不可），一律註明「歷史回測統計值，不代表未來，不構成投資建議」與倖存者偏差。
 5. 風險指標一律標註為「歷史統計值」，不是未來機率。
 6. **不偷看未來**：所有分析函式接受 `as_of`，只能看到 `available_date <= as_of` 的資料。
 7. 所有報告結尾附免責聲明：本工具僅供研究，不構成投資建議。
@@ -106,6 +106,11 @@
 - 每日匯出遇到 FinMind 額度用完（402）會等待後重試（`quota_retries`、`quota_wait_minutes`），互動指令不等待。
 - 資料檢查未通過的股票照樣列出並顯示失敗項目，不用舊資料替代；資料超過 `app.stale_after_hours` 未更新時 App 顯示警告。
 
+## 歷史回測參考（使用者 2026-10-17 修改規則）
+- `stock-research backtest`：2021-06-30 起每個月底以當時資料算 V1 綜合分數，比較之後 3／6／12 個月相對報酬指數的超額報酬，依分數區間統計平均、勝率、樣本數、區塊自助法信賴區間（區塊 = 股票 × 年度）。
+- 標示規則寫在 `config.yaml` 的 `backtest`，回測前 commit；修改要記在 `backtest/CHANGELOG.md`。結果存 `backtest/score_backtest.json`，每日匯出把對應區間附在每支股票上。
+- 標示只能由程式產生，必須附統計、倖存者偏差說明與「歷史回測統計值，不代表未來，不構成投資建議」。穩定性判定的 walk-forward 驗證仍不以股價為成功標準，兩者分開。
+
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |
 |---|---|---|---|
@@ -167,6 +172,7 @@ uv run stock-research config show        # 驗證並顯示 config
 uv run stock-research validate 2330      # 資料驗證 + 資料健康報告（需 FINMIND_TOKEN）
 uv run stock-research analyze 2330       # 完整分析報告 → reports/2330_<as_of>.md
 uv run stock-research breakpoints 2330   # 結構斷點掃描（僅供參考）
+uv run stock-research backtest           # 綜合分數歷史回測參考 → backtest/score_backtest.json
 uv run stock-research validation run known-cases              # 已知案例測試
 uv run stock-research validation run walk-forward --phase dev # 開發期（每次都是一次調參嘗試）
 ```
