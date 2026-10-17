@@ -185,6 +185,26 @@ def _growth_risk(a: Analysis) -> list[str]:
         for item in g.items
     ]
     lines += table(["項目", "數值", "得分（0-100）", "計算期間與說明"], rows) + [""]
+    r = a.risk_rating
+    score = (
+        f"{r.score:.0f}／100（越高越危險）" if r.score is not None else f"無法計算（{r.problem}）"
+    )
+    lines += [f"- 風險分數：{score}。{r.note}"]
+    if r.week52 is not None:
+        lines.append(
+            f"- 從 52 週高點已跌 {r.week52.off_high:.1%}；一年內從低點漲了 "
+            f"{r.week52.rise_from_low:.1%}（原始收盤價，{r.week52.close_date}）。"
+        )
+    lines.append("")
+    rows = [
+        [
+            item.name,
+            "—" if item.danger is None else f"{item.danger * 100:.0f}",
+            item.detail,
+        ]
+        for item in r.items
+    ]
+    lines += table(["項目", "危險程度（0-100）", "計算期間與說明"], rows) + [""]
     return lines
 
 

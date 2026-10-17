@@ -14,10 +14,12 @@ from datetime import date
 from stock_research.analysis.fundamentals import summarize, ttm_table
 from stock_research.analysis.growth import GrowthScore, growth_score
 from stock_research.analysis.inputs import StockData, load_stock_data
+from stock_research.analysis.research_score import ValuationPosition, valuation_position
 from stock_research.analysis.results import InsufficientHistory
 from stock_research.analysis.returns import ReturnComparison, compare_returns
 from stock_research.analysis.revenue import summarize_yoy
 from stock_research.analysis.risk import RiskMetrics, Sharpe, risk_metrics, sharpe_ratio
+from stock_research.analysis.risk_rating import RiskRating, risk_rating
 from stock_research.analysis.sensitivity import HalfLifeSensitivity, half_life_sensitivity
 from stock_research.analysis.stability_inputs import StabilityReport, stability_report
 from stock_research.analysis.technicals import Technicals, technicals
@@ -35,6 +37,7 @@ from stock_research.llm.analysis import (
 )
 from stock_research.llm.client import LlmClient
 from stock_research.llm.documents import DocumentProblem, load_documents
+from stock_research.validation.aspects import aspect_verdicts
 from stock_research.validation.metric_walk_forward import (
     WalkForwardEvidence,
     walk_forward_evidence,
@@ -94,6 +97,7 @@ class Analysis:
     technicals: Technicals | None
     llm: LlmSection | None
     growth: GrowthScore  # last 3 years of actual growth (成長 × 風險 §1.1), not a forecast
+    risk_rating: RiskRating  # 0-100 danger incl. overheating (成長 × 風險 §1.2)
 
 
 def _risk(data: StockData, analysis_config: AppConfig, stability: StabilityReport):
@@ -137,6 +141,32 @@ def _returns(
         )
         for name in MAIN_WINDOWS
     }
+
+
+def _risk_rating(
+    market_data: MarketData, data: StockData, config: AppConfig, stability: StabilityReport
+) -> RiskRating:
+    ticker = market_data.resolve(data.code)
+    try:
+        valuation = valuation_position(
+            market_data.exchange_valuation(ticker, data.as_of),
+            data.as_of,
+            market_data.listing_date(ticker),
+            config.research_score.valuation,
+        )
+    except DataValidationError as exc:
+        valuation = ValuationPosition({}, (), f"交易所本益比資料無法取得：{exc}")
+    aspects = aspect_verdicts(stability.metrics, config.validation)
+    return risk_rating(
+        data.prices.raw,
+        data.prices.adjusted,
+        data.benchmark,
+        valuation,
+        aspects["profitability"],
+        data.as_of,
+        config.risk.annualization_days,
+        config.risk_rating,
+    )
 
 
 def _fundamentals(data: StockData, config: AppConfig, stability: StabilityReport):
@@ -233,4 +263,5 @@ def run_analysis(
         technicals=technicals(data.prices.adjusted, config.technicals),
         llm=llm,
         growth=growth_score(data, config.growth),
+        risk_rating=_risk_rating(market_data, data, config, stability),
     )

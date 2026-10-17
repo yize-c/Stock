@@ -138,11 +138,49 @@ def consistency_part(
     )
 
 
-def _years_before(day: date, years: int) -> date:
+def years_before(day: date, years: int) -> date:
     try:
         return day.replace(year=day.year - years)
     except ValueError:  # 29 February
         return day.replace(year=day.year - years, day=28)
+
+
+@dataclass(frozen=True)
+class ValuationPosition:
+    """Where today's exchange P/E and P/B sit among the stock's own daily values."""
+
+    percentiles: dict[str, float]  # "pe" / "pb" -> share of own days at or below today
+    notes: tuple[str, ...]
+    problem: str | None  # no usable history at all
+
+
+def valuation_position(
+    valuation: pd.DataFrame, as_of: date, listing: date | None, settings: ValuationScoreConfig
+) -> ValuationPosition:
+    """``valuation``: date, pe, pb (exchange daily values; NaN where none was printed)."""
+    start = years_before(as_of, settings.lookback_years)
+    if listing is not None:
+        start = max(start, listing)
+    inside = valuation.loc[[start <= d <= as_of for d in valuation["date"]]]
+    if inside.empty or (as_of - max(inside["date"])).days > _MAX_STALE_DAYS:
+        return ValuationPosition({}, (), "近期沒有交易所本益比資料")
+    span_years = (max(inside["date"]) - min(inside["date"])).days / 365.25
+    if span_years < settings.min_years:
+        return ValuationPosition(
+            {}, (), f"估值歷史 {span_years:.1f} 年，少於 {settings.min_years} 年"
+        )
+    latest = inside.iloc[-1]
+    found, notes = {}, []
+    for column, label in (("pe", "本益比"), ("pb", "股價淨值比")):
+        history = inside[column].dropna()
+        current = latest[column]
+        if pd.isna(current) or history.empty:
+            notes.append(f"{label}無資料（虧損時交易所不列本益比）")
+            continue
+        percentile = float((history <= current).mean())
+        found[column] = percentile
+        notes.append(f"{label}位於自身 {span_years:.0f} 年第 {percentile:.0%} 百分位")
+    return ValuationPosition(found, tuple(notes), None)
 
 
 def valuation_part(
@@ -153,32 +191,13 @@ def valuation_part(
     points: int,
 ) -> ScorePart:
     """``valuation``: date, pe, pb (exchange daily values; NaN where none was printed)."""
-    start = _years_before(as_of, settings.lookback_years)
-    if listing is not None:
-        start = max(start, listing)
-    inside = valuation.loc[[start <= d <= as_of for d in valuation["date"]]]
-    if inside.empty or (as_of - max(inside["date"])).days > _MAX_STALE_DAYS:
-        return ScorePart("valuation", points, None, "近期沒有交易所本益比資料")
-    span_years = (max(inside["date"]) - min(inside["date"])).days / 365.25
-    if span_years < settings.min_years:
-        return ScorePart(
-            "valuation", points, None, f"估值歷史 {span_years:.1f} 年，少於 {settings.min_years} 年"
-        )
-    latest = inside.iloc[-1]
-    found, notes = [], []
-    for column, label in (("pe", "本益比"), ("pb", "股價淨值比")):
-        history = inside[column].dropna()
-        current = latest[column]
-        if pd.isna(current) or history.empty:
-            notes.append(f"{label}無資料（虧損時交易所不列本益比）")
-            continue
-        percentile = float((history <= current).mean())
-        found.append(percentile)
-        notes.append(f"{label}位於自身 {span_years:.0f} 年第 {percentile:.0%} 百分位")
-    if not found:
-        return ScorePart("valuation", points, None, "；".join(notes))
-    earned = points * (1.0 - float(np.mean(found)))
-    return ScorePart("valuation", points, earned, "；".join(notes))
+    position = valuation_position(valuation, as_of, listing, settings)
+    if position.problem is not None:
+        return ScorePart("valuation", points, None, position.problem)
+    if not position.percentiles:
+        return ScorePart("valuation", points, None, "；".join(position.notes))
+    earned = points * (1.0 - float(np.mean(list(position.percentiles.values()))))
+    return ScorePart("valuation", points, earned, "；".join(position.notes))
 
 
 def _ratio_score(ratio: float, settings: RiskScoreConfig) -> float:
@@ -199,7 +218,7 @@ def risk_part(
     points: int,
 ) -> ScorePart:
     """``adjusted``: date, adj_close; ``benchmark``: date, total_return_index."""
-    start = _years_before(as_of, settings.lookback_years)
+    start = years_before(as_of, settings.lookback_years)
     stock = adjusted.set_index("date")["adj_close"].dropna().astype(float)
     index = benchmark.set_index("date")["total_return_index"].dropna().astype(float)
     days = sorted(d for d in set(stock.index) & set(index.index) if start <= d <= as_of)

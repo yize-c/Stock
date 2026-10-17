@@ -716,3 +716,24 @@ growth:
   eps_cagr: { weight: 0.3, zero: 0.0, full: 0.25 }
   revenue_yoy: { weight: 0.2, zero: 0.0, full: 0.20 }
   gross_margin_trend: { weight: 0.2, zero: -0.02, full: 0.02 }  # per year: -2 to +2 points
+
+risk_rating:
+  # 成長 × 風險 §1.2: 0-100, higher is more dangerous; historical statistics, not future
+  # probabilities. Each item is a danger 0-1 from its band (0 at zero, 1 at full, either
+  # direction, clipped); the score is 100 x the weighted mean of the items with data.
+  # "股價被炒高就是最大的風險": overheating weighs the most (checked when loading).
+  lookback_years: 3
+  week52_days: 365
+  min_week52_days: 120
+  min_trading_days: 250
+  min_weight: 0.6
+  weights: { overheat: 0.35, drawdown: 0.20, off_high: 0.15, volatility: 0.15, stability: 0.15 }
+  drawdown: { zero: 0.20, full: 0.60 }
+  # Near the 52-week high is taken as more dangerous (the senior investor's "炒高"); 30% or
+  # more below it, as no extra danger. Swap zero and full to read it the other way.
+  off_high: { zero: 0.30, full: 0.0 }
+  rise_from_low: { zero: 0.10, full: 1.00 }
+  price_share: 0.5  # overheating = this x rise from the low + the rest x P/E-P/B percentile
+  volatility: { zero: 0.20, full: 0.60 }
+  beta: { zero: 0.8, full: 1.5 }
+  stability: { stable: 0.0, regime_shift: 0.5, unstable: 1.0 }

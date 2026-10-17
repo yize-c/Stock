@@ -964,6 +964,48 @@ class GrowthConfig(_Model):
         return self
 
 
+class RiskWeightsConfig(_Model):
+    overheat: Annotated[float, Field(ge=0.0)]
+    drawdown: Annotated[float, Field(ge=0.0)]
+    off_high: Annotated[float, Field(ge=0.0)]
+    volatility: Annotated[float, Field(ge=0.0)]
+    stability: Annotated[float, Field(ge=0.0)]
+
+    @model_validator(mode="after")
+    def _check(self) -> RiskWeightsConfig:
+        others = (self.drawdown, self.off_high, self.volatility, self.stability)
+        if any(self.overheat <= w for w in others):
+            raise ValueError("risk_rating.weights.overheat must be the largest weight (spec)")
+        return self
+
+
+class StabilityDangerConfig(_Model):
+    """Danger 0-1 of the profitability aspect's V1/V3 verdict."""
+
+    stable: Annotated[float, Field(ge=0.0, le=1.0)]
+    regime_shift: Annotated[float, Field(ge=0.0, le=1.0)]
+    unstable: Annotated[float, Field(ge=0.0, le=1.0)]
+
+
+class RiskRatingConfig(_Model):
+    """Risk score (成長 × 風險 §1.2): 0-100, higher is more dangerous. Each item is a danger
+    0-1 (bands: 0 at ``zero``, 1 at ``full``); the score is 100 x their weighted mean."""
+
+    lookback_years: PositiveInt  # drawdown (with the full period), volatility and beta
+    week52_days: PositiveInt  # calendar days of the 52-week high and low
+    min_week52_days: PositiveInt  # trading days needed inside that span
+    min_trading_days: PositiveInt  # common trading days for volatility and beta
+    min_weight: Annotated[float, Field(gt=0.0, le=1.0)]  # share of weights with data needed
+    weights: RiskWeightsConfig
+    drawdown: BandConfig  # the worse of the recent and the full-period maximum drawdown
+    off_high: BandConfig  # fall from the 52-week high (raw closes)
+    rise_from_low: BandConfig  # rise from the 52-week low (raw closes), overheating part 1
+    price_share: Annotated[float, Field(ge=0.0, le=1.0)]  # part 1's share; P/E-P/B the rest
+    volatility: BandConfig  # annualized, adjusted prices
+    beta: BandConfig  # against the total-return index
+    stability: StabilityDangerConfig
+
+
 class RobustnessConfig(_Model):
     """Spec v2 P1: half-life sensitivity and the overfitting warning."""
 
@@ -1005,6 +1047,7 @@ class AppConfig(_Model):
     robustness: RobustnessConfig
     portfolio: PortfolioConfig
     growth: GrowthConfig
+    risk_rating: RiskRatingConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:
