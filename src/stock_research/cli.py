@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from datetime import date
 from pathlib import Path
 
@@ -590,4 +591,13 @@ def score_experts_command(
         raise typer.Exit(code=1) from exc
     text = render_experts(scores)
     (folder / "scores.md").write_text(text, encoding="utf-8")
+    with (folder / "disagreements.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(
+            ["code", "question", "majority", "yes", "no", "tool_verdict", "tool_answer"]
+        )
+        for d in scores.disagreements:
+            writer.writerow(
+                [d.code, d.question, d.majority, d.yes, d.no, d.tool_verdict, d.tool_answer]
+            )
     typer.echo(text)

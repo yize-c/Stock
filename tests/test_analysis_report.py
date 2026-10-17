@@ -68,6 +68,9 @@ def test_report_has_every_section_and_the_disclaimer(analysis, config) -> None:
     assert "https://tw.stock.yahoo.com/quote/2330.TW" in text
     assert "不代表未來機率" in text
     assert "技術分析的實證效果有爭議" in text
+    # Spec v2 P2-10: which principles each investor's rules pass or fail, in words.
+    plain = text.split("### 白話解釋")[1].split("## 2.")[0]
+    assert "**Warren Buffett**" in plain and "不是買賣建議" in plain
     # Columns are always V1, V3, V2 (reference).
     assert "| 項目 | 判定 | V1 | V3 | V2（參考） |" in text
 

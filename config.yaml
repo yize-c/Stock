@@ -575,6 +575,7 @@ research_score:
   # a part without data is left out and the others are scaled to 100, but with fewer than
   # min_available_points of parts available there is no score.
   points: { principles: 40, consistency: 20, valuation: 15, risk: 15, chips: 10 }
+  max_chips_share: 0.15  # spec v2 P2-11: chips weigh at most 15%
   min_available_points: 70
   consistency:
     # B: among the metrics whose walk-forward is positive (written by
@@ -596,12 +597,17 @@ research_score:
     ratio_full: 1.0
     ratio_zero: 3.0
   chips:
-    # E: net buying by these investors over the last lookback_trading_days as a share of
-    # traded volume (net_share_full of buying = full points, the same of selling = none),
-    # and margin purchase balance / limit (margin_usage_zero or more = none).
+    # E (spec v2 P2-11), three factors averaged, each 0.5 at "no change":
+    # - the three institutional investors' combined net buying (+) or selling (-) days in a
+    #   row up to as_of (streak_full_days of buying = full, the same of selling = none);
+    # - the investment trust's net buying over the last lookback_trading_days as a share of
+    #   all shares (its change in holdings; trust_change_full = full, the same sold = none);
+    # - margin purchase balance / limit (none at margin_usage_zero or more).
     lookback_trading_days: 20
     investors: [Foreign_Investor, Foreign_Dealer_Self, Investment_Trust]
-    net_share_full: 0.10
+    streak_full_days: 10
+    trust_investor: Investment_Trust
+    trust_change_full: 0.01
     margin_usage_zero: 0.5
   # Capital tiers the export scores in advance (spec: 5萬, 30萬, 100萬, 300萬) with a holding
   # count inside the spec's range for each (<5萬: 1-3, 5-30萬: 3-5, 30-100萬: 5-10,

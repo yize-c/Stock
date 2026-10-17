@@ -778,6 +778,11 @@ def test_export_and_score_experts(monkeypatch, report, tmp_path) -> None:
     assert overall.ties == 1  # stock 4: one 是, one 否, one 不確定
     assert overall.expert_items == 3 and overall.majority_items == 3
     assert "專家間 kappa" in render_experts(scores)
+    # Spec v2 P2-12: stock 3's majority goes against the tool and is listed; 1 and 2 agree.
+    on_overall = {d.code: d for d in scores.disagreements if d.question == overall.question}
+    assert set(on_overall) == {"3"} and on_overall["3"].majority == other
+    assert on_overall["3"].tool_answer == agree and on_overall["3"].no + on_overall["3"].yes == 3
+    assert "意見不一致的案例" in render_experts(scores)
     _filled(folder, "E4", {"1": "也許"})
     with pytest.raises(FormError, match="是／否／不確定"):
         score_experts(folder, config)

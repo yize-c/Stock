@@ -5,7 +5,8 @@ verdicts at the same date, so experts and tool judge the same point in time.
 ``score_experts`` reads the filled copies (``filled_<expert>.csv``) and computes agreement
 between experts (Fleiss' kappa with three or more raters, Cohen's with two) and between the
 tool and the expert majority (Cohen's kappa, §14.1 mapping). "不確定" answers and majority ties
-are left out of kappa and counted separately.
+are left out of kappa and counted separately. Every stock and question where the majority and
+the tool disagree is listed (spec v2 P2-12), so the cases can be looked at one by one.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from __future__ import annotations
 import csv
 import json
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
@@ -147,10 +148,24 @@ class QuestionScore:
 
 
 @dataclass(frozen=True)
+class Disagreement:
+    """A stock and question where the expert majority and the tool disagree (spec v2 P2-12)."""
+
+    code: str
+    question: str
+    majority: str  # 是 / 否
+    yes: int
+    no: int
+    tool_verdict: str
+    tool_answer: str  # the verdict mapped to 是 / 否 (§14.1)
+
+
+@dataclass(frozen=True)
 class ExpertScores:
     as_of: date
     experts: list[str]
     questions: list[QuestionScore]
+    disagreements: list[Disagreement] = field(default_factory=list)
 
 
 def read_forms(folder: Path) -> dict[str, dict[str, dict[str, str]]]:
@@ -188,6 +203,7 @@ def score_experts(folder: Path, config: AppConfig) -> ExpertScores:
     codes = sorted(set.intersection(*(set(f) for f in forms.values())))
     settings = config.validation.experts
     scores = []
+    disagreements: list[Disagreement] = []
     for key in QUESTIONS:
         matrix = [[forms[e][c][key] for e in experts] for c in codes]
         cells = [x for row in matrix for x in row]
@@ -212,6 +228,12 @@ def score_experts(folder: Path, config: AppConfig) -> ExpertScores:
                 continue
             tool_labels.append(YES if j is Judgement.CHANGED else NO)
             majority_labels.append(YES if yes > no else NO)
+            if tool_labels[-1] != majority_labels[-1]:
+                disagreements.append(
+                    Disagreement(
+                        code, QUESTIONS[key], majority_labels[-1], yes, no, verdict, tool_labels[-1]
+                    )
+                )
         tool_kappa = cohen_kappa(tool_labels, majority_labels)
         passed = None
         if tool_kappa is not None:
@@ -232,4 +254,4 @@ def score_experts(folder: Path, config: AppConfig) -> ExpertScores:
                 passed=passed,
             )
         )
-    return ExpertScores(date.fromisoformat(tool["as_of"]), experts, scores)
+    return ExpertScores(date.fromisoformat(tool["as_of"]), experts, scores, disagreements)

@@ -213,4 +213,20 @@ def render_experts(scores: ExpertScores) -> str:
             f"{_num(q.expert_kappa)}（{q.expert_items}） | {_num(q.tool_kappa)}（{q.tool_items}） | "
             f"{q.ties} | {_passed(q.passed)} |"
         )
+    lines += ["", "## 專家多數決與工具意見不一致的案例", ""]
+    if scores.disagreements:
+        lines += [
+            "| 代號 | 問題 | 專家多數決（是／否票數） | 工具判定 | 工具換算 |",
+            "|---|---|---|---|---|",
+            *[
+                f"| {d.code} | {d.question} | {d.majority}（{d.yes}／{d.no}） | "
+                f"{d.tool_verdict} | {d.tool_answer} |"
+                for d in scores.disagreements
+            ],
+            "",
+            "逐案檢視：是專家看到工具沒有的資訊（如質化事件），還是工具的指標或門檻需要調整；"
+            "調整只能在開發期進行並記入調參紀錄。",
+        ]
+    else:
+        lines.append("沒有（多數決平手與「不確定」不列入）。")
     return "\n".join(lines) + "\n"

@@ -12,9 +12,13 @@ Base score (independent of capital), points per part from ``research_score.point
 * D risk: daily volatility and maximum drawdown of the adjusted price over ``lookback_years``,
   each divided by the TAIEX total-return index's on the same days; each ratio maps linearly
   from full points (``ratio_full``) to none (``ratio_zero``), and the two are averaged.
-* E chips: the configured investors' net buying over the last ``lookback_trading_days`` as a
-  share of traded volume (0.5 at zero, full at +``net_share_full``, none at -``net_share_full``)
-  and margin balance / limit (full at 0, none at ``margin_usage_zero``), averaged.
+* E chips (spec v2 P2-11), three factors averaged: the three institutional investors'
+  combined net buying or selling days in a row (0.5 at none, full at ``streak_full_days`` of
+  buying, none at as many of selling); the investment trust's net buying over
+  ``lookback_trading_days`` as a share of all shares, i.e. its change in holdings (full at
+  +``trust_change_full``, none at minus that); margin balance / limit (full at 0, none at
+  ``margin_usage_zero``). Shares come from the latest statement published by ``as_of``
+  (ordinary share capital / par).
 
 A part without data is left out and the available ones are scaled to 100; with fewer than
 ``min_available_points`` available there is no score. Then, per capital tier, the base score
@@ -216,16 +220,46 @@ def risk_part(
     return ScorePart("risk", points, points * float(np.mean(scores)), "；".join(detail))
 
 
+def _streak(net: pd.Series) -> int:
+    """Signed run length of same-sign values at the end of ``net`` (0 breaks a run)."""
+    values = net.to_numpy(dtype=float)
+    if len(values) == 0 or values[-1] == 0:
+        return 0
+    sign = np.sign(values[-1])
+    run = 0
+    for value in values[::-1]:
+        if np.sign(value) != sign:
+            break
+        run += 1
+    return int(sign * run)
+
+
+def _scaled(value: float, full: float) -> float:
+    """0.5 at zero, 1 at +full, 0 at -full."""
+    return float(np.clip(0.5 + value / (2 * full), 0.0, 1.0))
+
+
+def shares_outstanding(quarterly: pd.DataFrame, basis, as_of: date) -> float | None:
+    """Ordinary share capital / par from the latest statement published by ``as_of``."""
+    published = quarterly.loc[pd.to_datetime(quarterly["available_date"]) <= pd.Timestamp(as_of)]
+    capital = published["ordinary_share_capital"].dropna()
+    if capital.empty or capital.iloc[-1] <= 0:
+        return None
+    period_end = pd.Timestamp(capital.index[-1]).date()
+    return float(capital.iloc[-1]) / basis.par_on(period_end)
+
+
 def chips_part(
     institutional: pd.DataFrame,
     margin: pd.DataFrame,
     raw_prices: pd.DataFrame,
+    shares: float | None,
     as_of: date,
     settings: ChipsScoreConfig,
     points: int,
 ) -> ScorePart:
     """``institutional``: date, investor, buy, sell (shares); ``margin``: date, balance,
-    limit (lots); ``raw_prices``: date, volume (shares)."""
+    limit (lots); ``raw_prices``: date, volume (shares); ``shares``: all shares at ``as_of``."""
     visible = np.array([d <= as_of for d in raw_prices["date"]], dtype=bool)
     traded = raw_prices.loc[(raw_prices["volume"] > 0).to_numpy() & visible]
     days = list(traded["date"])[-settings.lookback_trading_days :]
@@ -233,14 +267,24 @@ def chips_part(
     if len(days) == settings.lookback_trading_days and (as_of - days[-1]).days <= _MAX_STALE_DAYS:
         window = set(days)
         in_window = np.array([d in window for d in institutional["date"]], dtype=bool)
-        chosen = institutional.loc[
-            institutional["investor"].isin(settings.investors).to_numpy() & in_window
-        ]
-        volume = float(traded.loc[[d in window for d in traded["date"]], "volume"].sum())
-        if not chosen.empty and volume > 0:
-            share = float((chosen["buy"] - chosen["sell"]).sum()) / volume
-            scores.append(float(np.clip(0.5 + share / (2 * settings.net_share_full), 0.0, 1.0)))
-            detail.append(f"近 {len(days)} 個交易日法人淨買超占成交量 {share:+.1%}")
+        rows = institutional.loc[in_window]
+        net = (rows["buy"] - rows["sell"]).astype(float)
+        if not rows.empty:
+            three = rows["investor"].isin(settings.investors).to_numpy()
+            daily = net[three].groupby(rows.loc[three, "date"]).sum().reindex(days, fill_value=0.0)
+            streak = _streak(daily)
+            scores.append(_scaled(streak, settings.streak_full_days))
+            if streak:
+                detail.append(f"三大法人連續{'買' if streak > 0 else '賣'}超 {abs(streak)} 日")
+            else:
+                detail.append("三大法人最近一日無買賣超")
+            trust = float(net[(rows["investor"] == settings.trust_investor).to_numpy()].sum())
+            if shares:
+                change = trust / shares
+                scores.append(_scaled(change, settings.trust_change_full))
+                detail.append(f"投信近 {len(days)} 個交易日持股變化 {change:+.2%}（占總股數）")
+            else:
+                detail.append("沒有股數資料，投信持股變化不計")
         else:
             detail.append("沒有法人買賣資料")
     else:
@@ -399,6 +443,7 @@ def score_stock(
                 market_data.institutional(ticker, as_of),
                 market_data.margin(ticker, as_of),
                 data.prices.raw,
+                shares_outstanding(data.quarterly, data.basis, as_of),
                 as_of,
                 settings.chips,
                 settings.points.chips,

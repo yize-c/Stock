@@ -796,9 +796,13 @@ class RiskScoreConfig(_Model):
 
 
 class ChipsScoreConfig(_Model):
+    """Part E (spec v2 P2-11): three factors, averaged."""
+
     lookback_trading_days: PositiveInt
-    investors: Annotated[list[str], Field(min_length=1)]
-    net_share_full: PositiveFloat  # net buying of this share of volume: full points
+    investors: Annotated[list[str], Field(min_length=1)]  # the three institutional investors
+    streak_full_days: PositiveInt  # this many days of net buying in a row: full points
+    trust_investor: str = Field(min_length=1)
+    trust_change_full: PositiveFloat  # trust net buying of this share of all shares: full
     margin_usage_zero: Annotated[float, Field(gt=0.0, le=1.0)]
 
 
@@ -831,6 +835,8 @@ class ResearchScoreConfig(_Model):
     """The 0-100 score of spec v2 §4 (base score, calibration caps, capital tiers, labels)."""
 
     points: ScorePointsConfig
+    # Spec v2 P2-11: the chips part may carry at most this share of the 100 points.
+    max_chips_share: Fraction
     min_available_points: Annotated[int, Field(ge=1, le=100)]
     consistency: ConsistencyScoreConfig
     valuation: ValuationScoreConfig
@@ -852,6 +858,8 @@ class ResearchScoreConfig(_Model):
         floors = [label.min_score for label in self.labels]
         if floors != sorted(floors, reverse=True) or floors[-1] != 0:
             raise ValueError("labels must go from the highest min_score down to 0")
+        if self.points.chips > 100 * self.max_chips_share:
+            raise ValueError(f"chips points must be at most {self.max_chips_share:.0%} of 100")
         return self
 
 

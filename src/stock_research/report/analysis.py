@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable
+from dataclasses import dataclass
 
 from stock_research.analysis.breakpoints import BreakResult
 from stock_research.analysis.frameworks.base import FrameworkResult, ItemKind, Outcome
@@ -154,7 +155,62 @@ def _summary(a: Analysis, shown: tuple[WindowName, ...], single: bool) -> list[s
         lines.append(f"- 整體穩定性判定：**{VERDICT_LABEL[st.overall.verdict]}**")
     scores = " / ".join(f"{WINDOW_LABEL[w]} {pct(st.composites[w].score, 0)}" for w in shown)
     lines += [f"- 綜合分數：{scores}", f"- {SCORE_DISCLAIMER}", ""]
+    if WindowName.POST_2020 in shown:
+        lines += _plain_principles(a)
     return lines
+
+
+@dataclass(frozen=True)
+class PrincipleSummary:
+    framework: str
+    name: str
+    not_applicable: str | None
+    passed: list[str]
+    failed: list[str]
+    unknown: list[str]  # not enough data, or the rule does not apply to this stock
+
+
+def principle_summary(a: Analysis) -> list[PrincipleSummary]:
+    """Spec v2 P2-10: which of each investor's principles the stock meets in V1, in words."""
+    out = []
+    for result in a.stability.framework_results[WindowName.POST_2020]:
+        scored = [i for i in result.items if i.kind is ItemKind.SCORED]
+        out.append(
+            PrincipleSummary(
+                framework=result.framework,
+                name=FRAMEWORK_LABEL[result.framework],
+                not_applicable=result.not_applicable,
+                passed=[i.name for i in scored if i.outcome is Outcome.PASS],
+                failed=[i.name for i in scored if i.outcome is Outcome.FAIL],
+                unknown=[
+                    i.name
+                    for i in scored
+                    if i.outcome in (Outcome.INSUFFICIENT, Outcome.NOT_APPLICABLE)
+                ],
+            )
+        )
+    return out
+
+
+def _quoted(names: list[str]) -> str:
+    return "".join(f"「{n}」" for n in names)
+
+
+def _plain_principles(a: Analysis) -> list[str]:
+    lines = ["### 白話解釋：符合與不符合哪些投資大師原則（V1，2020 後）", ""]
+    for f in principle_summary(a):
+        if f.not_applicable:
+            lines.append(f"- **{f.name}**：整個框架不適用（{f.not_applicable}）。")
+            continue
+        parts = []
+        if f.passed:
+            parts.append(f"符合 {len(f.passed)} 條：{_quoted(f.passed)}")
+        if f.failed:
+            parts.append(f"不符合 {len(f.failed)} 條：{_quoted(f.failed)}")
+        if f.unknown:
+            parts.append(f"無法判斷（資料不足或不適用）：{_quoted(f.unknown)}")
+        lines.append(f"- **{f.name}**：{'；'.join(parts) or '沒有計分條件'}。")
+    return lines + ["", "只描述是否符合這些原則（程式依 config 的門檻判斷），不是買賣建議。", ""]
 
 
 def _health(a: Analysis) -> list[str]:

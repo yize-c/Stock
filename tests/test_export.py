@@ -55,6 +55,9 @@ def test_export_writes_index_and_detail(config, tmp_path) -> None:
     assert len(sensitivity["composite"]["values"]) == 3
     assert "walk-forward" in detail["walk_forward_note"]
     assert "半衰期敏感度（V1）" in detail["report_markdown"]
+    principles = {p["framework"]: p for p in detail["principles"]}
+    assert set(principles) >= {"warren_chou", "buffett"}
+    assert {"passed", "failed", "unknown", "not_applicable", "name"} <= set(principles["buffett"])
     text = (tmp_path / "site" / "data" / "stocks" / "2330.json").read_text(encoding="utf-8")
     assert "NaN" not in text and "Infinity" not in text
 

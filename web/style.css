@@ -146,6 +146,7 @@ ul.list { list-style: none; margin: 0; padding: 0 var(--gutter) 8px; display: gr
 .info[open] { display: block; flex-basis: 100%; }
 .legend { margin: 0 0 8px; padding: 10px 12px 10px 28px; background: var(--card); border-radius: 10px; font-size: 13px; color: var(--muted); }
 .drivers { font-size: 14px; color: var(--muted); padding: 2px 0 6px; }
+.plain { margin: 0; padding-left: 18px; } .plain li + li { margin-top: 8px; }
 .sections { display: grid; gap: 6px; margin-top: 10px; }
 details.sec { background: var(--card); border-radius: var(--radius); }
 details.sec > summary, details.fw > summary {
