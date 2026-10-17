@@ -83,7 +83,7 @@
 - Hooks（`.claude/hooks/`，只用標準函式庫，測試在 `tests/test_hooks.py`）：
   - `format_and_test.py`：編輯 Python 檔後跑 `ruff format` 與 import 該模組的測試，失敗回報給 Claude。
   - `guard_secrets.py`：`git commit` 前掃描所有可能被提交的變更（含未追蹤檔），發現 `.env`、環境變數／`.env` 中 token 的值、或 Anthropic key／JWT 形狀字串就擋下。
-  - `protect_forward_log.py`：`validation/forward_log/` 已存在的檔案不可修改；shell 指令以該資料夾為寫入、搬移、刪除目標一律擋下（heredoc 內容不算）。
+  - `protect_forward_log.py`：`validation/forward_log/`、`expert_forms/`、`reviews/` 已存在的檔案不可修改；shell 指令以該資料夾為寫入、搬移、刪除目標一律擋下（heredoc 內容不算）。
 - Subagents：`data-auditor`、`report-reviewer`、`validation-reviewer`（唯讀）；Skill `stock-analysis`；指令 `/analyze <代號>` 跑分析後交給 report-reviewer。
 - 保留期的執行限制在第 10 階段由程式檢查（`preregistration.md` 未 commit 就拒絕 `--phase holdout`）。
 
@@ -158,6 +158,7 @@
 - 風險分數（`analysis/risk_rating.py`，config `risk_rating`，0–100 越高越危險，標示「歷史統計值，不是未來機率」）：過熱程度（權重最高，config 會檢查；= `price_share` × 一年內從 52 週低點的漲幅 + 其餘 × 本益比／股價淨值比在自身 10 年的百分位，百分位沿用 `research_score.valuation`）、最大回撤（近 3 年與全期取較差，還原權息價格）、目前距 52 週高點（原始收盤價；預設**越接近高點越危險**，Claude 依「股價被炒高是最大風險」判斷，對調 `off_high` 的 zero／full 即可反過來）、近 3 年年化波動度與 Beta（還原價格、對加權報酬指數）、獲利面向 V1／V3 判定（不穩定加分）。52 週高低點用原始收盤價（停牌日不算），回撤用還原價格，兩者不混用。有資料的權重少於 `min_weight` 不給分。
 - 配分（使用者選方案 1）：成長與風險 40 分依投資人偏好（`research_score.preferences`）分給成長與低風險（100 − 風險分數）：保守（預設，資深股民偏好）15／25、平衡 20／20、積極 25／15；偏好只改這兩個權重，不改任何原始數字。每種偏好各自校準（`calibration/summary.py` 的 `preferences`），沒通過門檻的偏好不上線；匯出的分數最上層是預設偏好，`preferences` 放各偏好。`analysis/growth_risk.py` 的 `assess` 是分析、匯出、校準共用的入口。
 - 風險檢查清單（`analysis/risk_checklist.py`，config `risk_checklist`，**資訊項、不計分**）：使用者列的台積電五項風險。量化（已公告財報與月營收）：支出過高＝資本支出÷營收、自由現金流、折舊年增率；需求不穩定＝月營收年增率 12 個月標準差、存貨周轉天數（近四季平均存貨÷營業成本×365）、營收季增率；能源原物料＝營業成本率、毛利率。每項顯示最新值與近 3 年方向（最小平方變化，比率差 <1 個百分點、金額與天數差 <平均 5% 為持平），並標出風險升高的方向。業務太集中、政治因素沒有量化指標；質化部分（第 5 步）從使用者放入的文件由 LLM 摘要，沒文件就寫「未提供文件」。財報新讀入 CostOfGoodsSold、Depreciation、Inventories。
+- 專家紀錄（`validation/expert_forms/2026-10-17_senior_investor.yaml`）：資深股民的 14 條原則與台積電判斷（中成長・高風險）。`stock-research validation compare-expert <紀錄>` 在判斷日重算成長、風險、象限，寫成新的對照檔（`*_comparison_<台北時間 YYYY-MM-DDTHHMM>.md`，已存在就拒絕），列出每個不一致的軸與造成它的指標；repo 公開，所以只寫程式算出的比率與分數，不寫 EPS 等財報原始數字。`validation/expert_forms/` 與 `validation/reviews/` 和 `forward_log/` 一樣只能新增（`.claude/hooks/protect_forward_log.py`）。
 - 四象限（`quadrant` config：成長 ≥67 高、≥33 中，風險 ≥50 高）：中成長・低風險為資深股民偏好。「距 52 週高點」越接近越危險，使用者確認。
 
 ## 三個版本（TimeWindow）

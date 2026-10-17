@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 from datetime import date
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import typer
 import yaml
@@ -395,6 +396,7 @@ SetOption = typer.Option(
 )
 CodesArgument = typer.Argument(None, help="Stock codes (default: the walk-forward universe).")
 DateOption = typer.Option(None, "--date", help="As-of date(s) to audit (repeatable).")
+RecordArgument = typer.Argument(..., help="An expert record (validation/expert_forms/*.yaml).")
 FolderArgument = typer.Argument(..., help="An expert_forms/<date> folder with filled_*.csv.")
 
 
@@ -588,6 +590,54 @@ def export_expert_forms_command(
         typer.echo(f"forms for today already exist: {exc.filename}", err=True)
         raise typer.Exit(code=1) from exc
     typer.echo(f"written: {folder}")
+
+
+@validation_app.command("compare-expert")
+def compare_expert_command(
+    record: Path = RecordArgument,
+    config: Path = ConfigOption,
+) -> None:
+    """The tool's growth, risk and quadrant next to each judgement in an expert record
+    (成長 × 風險 §3); writes a new dated comparison file next to the record."""
+    from stock_research.analysis.growth_risk import assess
+    from stock_research.analysis.inputs import load_stock_data
+    from stock_research.analysis.stability_inputs import stability_report
+    from stock_research.validation.expert_record import (
+        RecordError,
+        compare,
+        load_record,
+        output_path,
+        render,
+    )
+
+    cfg = _load(config)
+    try:
+        body, judgements = load_record(record)
+    except RecordError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    market_data = _open(cfg)
+    run_at = market_data.now.astimezone(ZoneInfo(cfg.general.timezone))
+    run_date = run_at.date()
+    target = output_path(record, run_at)
+    if target.exists():
+        typer.echo(f"{target} already exists (comparisons are append-only)", err=True)
+        raise typer.Exit(code=1)
+    comparisons = []
+    for judgement in judgements:
+        _echo(f"{judgement.code} at {judgement.as_of}")
+        health = market_data.health_report(judgement.code, judgement.as_of)
+        if not health.passed:
+            failed = ", ".join(c.name for c in health.checks if not c.passed)
+            typer.echo(f"{judgement.code}: data checks failed ({failed})", err=True)
+            raise typer.Exit(code=1)
+        data = load_stock_data(market_data, judgement.code, judgement.as_of, with_peers=False)
+        report = stability_report(data, cfg, with_breakpoints=False)
+        comparisons.append(compare(judgement, assess(market_data, data, report, cfg)))
+    text = render(body, comparisons, run_date)
+    target.write_text(text, encoding="utf-8")
+    typer.echo(text)
+    typer.echo(f"written: {target}")
 
 
 @validation_app.command("score-experts")
