@@ -31,6 +31,7 @@ import requests
 from stock_research.config import AppConfig, KnownSuspension, ManualClosure, Secrets
 from stock_research.data.adjustment import AdjustedPrices, adjust_prices
 from stock_research.data.cache import Cache
+from stock_research.data.early_changes import UncoveredCapitalChange, uncovered_capital_changes
 from stock_research.data.errors import (
     AnomalyError,
     DataValidationError,
@@ -146,6 +147,7 @@ class _Memo:
     calendar: TradingCalendar | None = None
     info: pd.DataFrame | None = None
     raw: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = field(default_factory=dict)
+    uncovered: dict[str, list[UncoveredCapitalChange]] = field(default_factory=dict)
 
 
 class MarketData:
@@ -311,7 +313,33 @@ class MarketData:
             if override.ticker == ticker.code:
                 start = max(start, override.start)
         raw = raw.loc[pd.to_datetime(raw["date"]) >= pd.Timestamp(start)]
+        uncovered = self.uncovered_capital_changes(ticker, raw, events, as_of)
+        if uncovered:
+            raw = raw.loc[pd.to_datetime(raw["date"]) >= pd.Timestamp(uncovered[-1].resumed)]
         return adjust_prices(ticker.code, raw.reset_index(drop=True), events, as_of)
+
+    def uncovered_capital_changes(
+        self, ticker: Ticker, raw: pd.DataFrame, events: pd.DataFrame, as_of: date
+    ) -> list[UncoveredCapitalChange]:
+        """Pre-2011 halt-then-jump resumptions in ``raw`` (see ``data/early_changes.py``)."""
+        finmind = self._config.data_sources.finmind
+        if raw.empty or min(raw["date"]) >= finmind.capital_reduction_coverage_start:
+            found: list[UncoveredCapitalChange] = []
+        else:
+            found = uncovered_capital_changes(
+                raw,
+                self.calendar(),
+                coverage_start=finmind.capital_reduction_coverage_start,
+                as_of=as_of,
+                limits=self._tw.price_limits,
+                event_dates=list(events["date"]),
+                known_suspensions=[
+                    (k.start, k.end) for k in self._tw.known_suspensions if k.ticker == ticker.code
+                ],
+                min_halt_trading_days=self._tw.data_validation.min_halt_trading_days,
+            )
+        self._memo.uncovered[ticker.code] = found
+        return found
 
     def _raw_prices(self, ticker: Ticker) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Full FinMind history (including any emerging-board period) and price events."""
@@ -400,6 +428,8 @@ class MarketData:
             _attempt(report, "listing.official_tpex", lambda: self._check_tpex_listing(ticker))
         prices = _attempt(report, "prices.fetch_and_adjust", lambda: self.prices(ticker, as_of))
         if prices is not None:
+            for change in self._memo.uncovered.get(ticker.code, []):
+                report.limitations.append(change.describe(ticker.code))
             self._price_checks(report, ticker, prices, calendar, as_of, now)
         bench = _attempt(report, "benchmark.fetch", lambda: self.benchmark(as_of))
         if bench is not None:

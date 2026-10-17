@@ -563,7 +563,7 @@ def test_cli_dev_run_logs_the_attempt(
         {"universe": ["1234"], "baseline_draws": 10, "bootstrap_draws": 10}
     )
     path = write_config(raw_config)
-    monkeypatch.setattr(cli, "open_market_data", lambda cfg: FakeMarket())
+    monkeypatch.setattr(cli, "open_market_data", lambda cfg, **_: FakeMarket())
     monkeypatch.setattr(wf, "load_stock_data", _fake_loader)
     monkeypatch.setattr(wf, "stability_report", lambda data, cfg, **_: report)
     args = ["validation", "run", "walk-forward", "--phase", "dev", "--config", str(path)]
@@ -806,7 +806,7 @@ def cli_env(monkeypatch, report, raw_config, write_config, tmp_path):
         monkeypatch.setattr(module, "load_stock_data", _fake_loader)
     for module in (kc, ex):
         monkeypatch.setattr(module, "stability_report", lambda data, cfg, **_: report)
-    monkeypatch.setattr(cli, "open_market_data", lambda cfg: FakeMarket())
+    monkeypatch.setattr(cli, "open_market_data", lambda cfg, **_: FakeMarket())
     cases = _cases_file(tmp_path / "cases.yaml", [_case("1", "changed")])
     raw_config["validation"]["known_cases"]["file"] = str(cases)
     raw_config["validation"]["walk_forward"]["universe"] = ["1234"]

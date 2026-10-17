@@ -264,7 +264,7 @@ def run_known_cases_command(config: Path = ConfigOption) -> None:
 
     cfg = _load(config)
     cases = load_known_cases(cfg.validation.known_cases.file)
-    market_data = _open(cfg)
+    market_data = _open(cfg, batch=True)
     result = run_known_cases(market_data, cfg, cases, progress=_echo)
     text = render_known_cases(result, cases.labeled_by)
     stamp = market_data.now.strftime("%Y%m%dT%H%M%S")
@@ -316,7 +316,7 @@ def run_walk_forward_command(
         except (ValueError, ConfigError, wf.TuningLimitReached) as exc:
             typer.echo(str(exc), err=True)
             raise typer.Exit(code=1) from exc
-    market_data = _open(cfg)
+    market_data = _open(cfg, batch=True)
     started = market_data.now
     if phase == "holdout":
         acquire_holdout_lock(directory, registration, started)

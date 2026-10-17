@@ -186,40 +186,10 @@ markets:
     # Prices before a capital change whose reference price is missing from FinMind cannot be
     # adjusted; such a stock's prices start on the day trading resumed after the last one.
     # Format: - { ticker: "1234", start: 2009-03-20, reason: "..." }
-    price_history_overrides:
-      - ticker: "2412"
-        start: 2010-02-08
-        reason: >-
-          Capital changes with trading halts in 2008 (2007-12-21 to 2008-01-08), 2009
-          (2009-03-03 to 2009-03-19) and 2010 (2010-01-21 to 2010-02-05) are missing from
-          TaiwanStockCapitalReductionReferencePrice (it starts with the 2011 reduction);
-          without reference prices the resumption days show false jumps (+13.9%, +19.3%).
-      - ticker: "2303"
-        start: 2007-10-09
-        reason: >-
-          Capital change: halted from 2007-09-20, resumed 2007-10-09 at +22.1% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
-      - ticker: "2357"
-        start: 2010-06-24
-        reason: >-
-          Pegatron spin-off: halted from 2010-05-18, resumed 2010-06-24 at +377% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
-      - ticker: "2379"
-        start: 2007-06-25
-        reason: >-
-          Capital change: halted from 2007-06-12, resumed 2007-06-25 at +102% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
-      - ticker: "2408"
-        start: 2009-08-26
-        reason: >-
-          Capital change: halted from 2009-08-13, resumed 2009-08-26 at +177% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
-      - ticker: "5347"
-        start: 2007-04-16
-        reason: >-
-          A capital change (halted from 2004-09-29, +78.9% on 2004-10-18) and unexplained limit breaches on 2005-07-08 (-8.3%) and 2007-04-14 (+9.2%); prices before the last breach are excluded. TaiwanStockCapitalReductionReferencePrice starts in 2011.
-      - ticker: "4904"
-        start: 2008-03-28
-        reason: >-
-          Capital change: halted from 2008-03-11, resumed 2008-03-28 at +24.4%, and an
-          unexplained -13.2% on 2004-08-12. TaiwanStockCapitalReductionReferencePrice starts
-          in 2011.
+    # Unexplained multi-day halts before FinMind's capital-reduction coverage are detected
+    # automatically (data/early_changes.py). Use this only for other cases that make early
+    # prices unusable. Format: - { ticker: "1234", start: 2009-03-20, reason: "..." }
+    price_history_overrides: []
     benchmark:
       # Total-return index matches returns computed from dividend-adjusted prices.
       primary: TAIEX_TOTAL_RETURN
@@ -237,6 +207,10 @@ markets:
       fallback_rates: []
     industry_classification: twse_tpex
     data_validation:
+      # Before FinMind's capital-reduction coverage, a halt of at least this many trading
+      # days followed by a close beyond the price limit (and no ex-rights event) is treated
+      # as an uncovered capital change: prices start on the resumption day.
+      min_halt_trading_days: 3
       # Raw-close cross-check between official, FinMind and yfinance.
       cross_source_tolerance: 0.005
       cross_source_lookback_trading_days: 60
@@ -376,6 +350,8 @@ data_sources:
     # remaining stocks; interactive commands never wait.
     quota_retries: 2
     quota_wait_minutes: 20
+    # TaiwanStockCapitalReductionReferencePrice starts with 2011 events.
+    capital_reduction_coverage_start: 2011-01-01
     # First date requested for daily series; each series starts where FinMind's data does
     # (stock prices from 1994, TAIEX closes and the trading calendar from 1999-01-05).
     history_start: 1990-01-01

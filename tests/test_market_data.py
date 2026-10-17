@@ -326,6 +326,24 @@ def test_price_history_override_moves_the_start(make) -> None:
     assert prices.adjusted["date"].min() == date(2026, 9, 1)
 
 
+def test_unexplained_early_halt_moves_the_price_start(make) -> None:
+    """A stock-specific halt before FinMind's capital-reduction coverage (moved into the
+    fixture's range here) starts the price history on the resumption day, and says so."""
+    routes = base_routes()
+    rows = data("finmind_price_2330_recent.json")
+    halted = {"2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"}
+    routes[("TaiwanStockPrice", "2330")] = [r for r in rows if r["date"] not in halted]
+
+    def tweak(raw):
+        raw["data_sources"]["finmind"]["capital_reduction_coverage_start"] = "2027-01-01"
+
+    md, _ = make(routes, overrides=[TSMC_LISTING], tweak=tweak)
+    assert md.prices(TSMC, AS_OF).raw["date"].min() == date(2026, 9, 7)
+    report = md.health_report("2330", AS_OF)
+    assert report.passed, [c for c in report.checks if not c.passed]
+    assert any("2026-09-07 前的股價未使用" in line for line in report.limitations)
+
+
 def test_cross_source_skips_every_day_before_a_yahoo_split(make) -> None:
     """Yahoo adjusts closes before a stock dividend; those days must not be compared, and
     older days must not refill the lookback window (9917, 2026-08-31 stock dividend)."""

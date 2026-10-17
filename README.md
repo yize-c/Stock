@@ -54,6 +54,11 @@ Further limits found while building the data layer:
   until they cover the window.
 - **Trading halts for capital changes** (re-issuing shares after a reduction, split or par-value
   change) are derived from the event data and reported as expected gaps.
+- **Capital changes before 2011 are missing from FinMind.** A stock-specific halt of three or
+  more trading days before 2011 that no ex-rights event or known suspension explains (often
+  followed by a close beyond the price limit) means prices before it cannot be adjusted. The
+  price history then starts on the resumption day and the data-health report says so
+  (`data/early_changes.py`).
 
 ## Design principles
 

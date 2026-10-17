@@ -242,6 +242,9 @@ class RiskFreeConfig(_Model):
 
 
 class DataValidationConfig(_Model):
+    # A halt of at least this many trading days before a beyond-limit close, earlier than
+    # FinMind's capital-reduction coverage, marks an uncovered capital change.
+    min_halt_trading_days: PositiveInt
     cross_source_tolerance: Fraction
     cross_source_lookback_trading_days: PositiveInt
     balance_sheet_tolerance: Fraction
@@ -486,6 +489,9 @@ class FinMindConfig(_Model):
     max_requests_per_hour: PositiveInt
     # Batch export only: on an exhausted quota (HTTP 402) wait this long and retry.
     quota_retries: Annotated[int, Field(ge=0)]
+    # First date of TaiwanStockCapitalReductionReferencePrice; earlier capital changes are
+    # detected from the prices instead (see data/early_changes.py).
+    capital_reduction_coverage_start: date
     quota_wait_minutes: PositiveFloat
     history_start: date
     price_history_start: date
