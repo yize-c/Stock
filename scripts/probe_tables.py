@@ -25,17 +25,23 @@ def fetch(url: str) -> bytes:
 
 
 def show_rates(out: Path) -> None:
-    import xlrd  # CI only
+    import io
+
+    import openpyxl  # CI only; the file is xlsx despite its .xls name
 
     body = fetch(RATES)
-    (out / "a13rate.xls").write_bytes(body)
-    book = xlrd.open_workbook(file_contents=body)
-    for sheet in book.sheets():
-        print(f"=== sheet {sheet.name!r}: {sheet.nrows} rows x {sheet.ncols} cols")
-        for r in list(range(min(14, sheet.nrows))) + list(
-            range(max(14, sheet.nrows - 6), sheet.nrows)
-        ):
-            print(r, [sheet.cell_value(r, c) for c in range(sheet.ncols)])
+    (out / "a13rate.xlsx").write_bytes(body)
+    book = openpyxl.load_workbook(io.BytesIO(body), read_only=True, data_only=True)
+    for sheet in book.worksheets:
+        rows = list(sheet.iter_rows(values_only=True))
+        print(f"=== sheet {sheet.title!r}: {len(rows)} rows")
+        # Header and the last rows only: enough to find the columns and the date format.
+        for i in [*range(min(10, len(rows))), *range(max(10, len(rows) - 5), len(rows))]:
+            cells = ["" if v is None else str(v) for v in rows[i]]
+            while cells and cells[-1] == "":
+                cells.pop()
+            if cells:
+                print(i, "|".join(cells))
 
 
 def show_cpi(out: Path) -> None:
@@ -51,7 +57,7 @@ def show_cpi(out: Path) -> None:
 def main() -> int:
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "probe")
     out.mkdir(parents=True, exist_ok=True)
-    for name, show in (("rates", show_rates), ("cpi", show_cpi)):
+    for name, show in (("rates", show_rates),):
         try:
             show(out)
         except Exception as exc:  # report and continue with the next source
