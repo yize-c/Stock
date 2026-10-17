@@ -13,6 +13,7 @@ known from data inside that period; the calibration output says so.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -58,12 +59,30 @@ def save(summary: dict[str, Any], path: Path, now: datetime) -> None:
     path.write_text(json.dumps(body, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def positive_metrics(path: Path) -> tuple[frozenset[str], str] | None:
-    """The metrics whose walk-forward is positive, and where that comes from; None if the
-    file has not been produced."""
+@dataclass(frozen=True)
+class WalkForwardEvidence:
+    evaluated: frozenset[str]
+    positive: frozenset[str]
+    source: str
+
+
+def walk_forward_evidence(path: Path) -> WalkForwardEvidence | None:
+    """Which metrics were evaluated, which are positive, and where that comes from; None if
+    the file has not been produced."""
     if not path.exists():
         return None
     body = json.loads(path.read_text(encoding="utf-8"))
-    positive = frozenset(m for m, r in body["metrics"].items() if r["positive"])
+    metrics = body["metrics"]
     first, last = body["base_dates"]
-    return positive, f"walk-forward 開發期第 {body['attempt']} 次（{first}～{last}）"
+    return WalkForwardEvidence(
+        frozenset(metrics),
+        frozenset(m for m, r in metrics.items() if r["positive"]),
+        f"walk-forward 開發期第 {body['attempt']} 次（{first}～{last}）",
+    )
+
+
+def positive_metrics(path: Path) -> tuple[frozenset[str], str] | None:
+    """The metrics whose walk-forward is positive, and where that comes from; None if the
+    file has not been produced."""
+    evidence = walk_forward_evidence(path)
+    return None if evidence is None else (evidence.positive, evidence.source)

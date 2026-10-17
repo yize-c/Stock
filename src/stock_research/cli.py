@@ -355,6 +355,8 @@ def calibration_summarize(
     summary.save(result, cfg.calibration.output)
     gate = result["gate"]
     typer.echo(f"gate passed: {result['passed']} ({gate.get('reason') or 'ok'})")
+    if result["overfit"]["warning"]:
+        typer.echo(f"overfitting warning: {result['overfit']['message']}")
     tier = gate["tier"]
     for entry in result["table"]:
         oos = entry["out_of_sample"]["tiers"][tier]
@@ -426,6 +428,7 @@ def run_walk_forward_command(
         git_commit,
     )
     from stock_research.validation.report import render_walk_forward
+    from stock_research.validation.statistics import overfit_check
 
     if phase not in ("dev", "holdout"):
         typer.echo("--phase must be dev or holdout", err=True)
@@ -464,7 +467,17 @@ def run_walk_forward_command(
     if phase == "dev":
         wf.append_tuning_log(directory, wf.tuning_row(run, applied, started, commit, dirty))
         attempts = wf.tuning_attempts(directory)
-    text = render_walk_forward(run, settings.confidence, attempts)
+    overfit = None
+    if phase == "holdout":
+        dev_auc = wf.attempt_auc(directory, registration.selected_attempt)
+        holdout_auc = run.evaluation.tool_auc.estimate
+        check = overfit_check(
+            None if dev_auc is None else dev_auc - 0.5,
+            None if holdout_auc is None else holdout_auc - 0.5,
+            cfg.robustness.overfit_ratio,
+        )
+        overfit = (check, registration.selected_attempt)
+    text = render_walk_forward(run, settings.confidence, attempts, overfit)
     name = f"walk_forward_dev_attempt_{attempt:02d}.md" if attempt else "walk_forward_holdout.md"
     path = _write_result(directory / "results", name, text)
     typer.echo(text)

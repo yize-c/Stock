@@ -49,6 +49,12 @@ def test_export_writes_index_and_detail(config, tmp_path) -> None:
     assert {f["key"] for f in detail["frameworks"]} >= {"buffett", "warren_chou"}
     assert all("歷史統計值" in r["label"] for r in detail["risk"].values() if r["available"])
     assert {m["key"] for m in detail["metrics"]} >= {"volatility", "roe", "revenue_yoy"}
+    # Spec v2 P1: half-life sensitivity and where the consistency score's evidence comes from.
+    sensitivity = detail["half_life_sensitivity"]
+    assert sensitivity["multipliers"] == ["0.5 倍", "1 倍", "2 倍"]
+    assert len(sensitivity["composite"]["values"]) == 3
+    assert "walk-forward" in detail["walk_forward_note"]
+    assert "半衰期敏感度（V1）" in detail["report_markdown"]
     text = (tmp_path / "site" / "data" / "stocks" / "2330.json").read_text(encoding="utf-8")
     assert "NaN" not in text and "Infinity" not in text
 
@@ -211,11 +217,16 @@ def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) 
     research = _read(tmp_path / "b" / "data" / "stocks" / "2330.json")["research_score"]
     assert not research["available"] and "不上線" in research["reason"]
 
-    save(_calibration(True), config.calibration.output)
+    passed = _calibration(True) | {"overfit": {"warning": True, "message": "可能過度擬合"}}
+    save(passed, config.calibration.output)
     export_site(md, config, tmp_path / "c")
     detail = _read(tmp_path / "c" / "data" / "stocks" / "2330.json")
     research = detail["research_score"]
     assert research["available"], research.get("reason")
+    assert "可能過度擬合" in research["notes"]
+    walk_forward = {m["key"]: m["walk_forward"] for m in detail["metrics"]}
+    assert walk_forward["roe"] == "正向" and walk_forward.get("volatility") is None
+    assert "ROE" in detail["walk_forward_note"]
     assert [t["capital"] for t in research["tiers"]] == [50000, 300000, 1000000, 3000000]
     assert all(0 <= t["score"] <= 100 and t["label"] for t in research["tiers"])
     assert {p["name"] for p in research["parts"]} >= {"投資大師原則", "籌碼"}

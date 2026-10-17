@@ -94,11 +94,14 @@ def test_groups_are_assigned_within_each_month() -> None:
     assert list(grouped["group"]) == [1, 1, 2, 2, 2, 2, 1, 1]
 
 
-def _rows(slope: float) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Ten stocks per month; a higher score earns ``slope`` more 12-month gross return."""
+def _rows(slope: float, in_sample_slope: float | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Ten stocks per month; a higher score earns ``slope`` more 12-month gross return
+    (``in_sample_slope`` before the out-of-sample start, when given)."""
     rng = np.random.default_rng(0)
     rows, bench = [], []
+    oos_start = CONFIG.calibration.out_of_sample_start
     for base in pipeline.base_dates(CONFIG.calibration):
+        step = slope if in_sample_slope is None or base >= oos_start else in_sample_slope
         bench.append({"base_date": base, "etf_gross": 0.05, "etf_close": 150.0, "rf": 0.015})
         for i in range(10):
             rows.append(
@@ -107,7 +110,7 @@ def _rows(slope: float) -> tuple[pd.DataFrame, pd.DataFrame]:
                     "base_date": base,
                     "status": "OK",
                     "score": 40 + 4 * i + rng.normal(0, 0.1),
-                    "gross": -0.05 + slope * i + rng.normal(0, 0.01),
+                    "gross": -0.05 + step * i + rng.normal(0, 0.01),
                     "delisted_in_horizon": False,
                 }
             )
@@ -140,6 +143,19 @@ def test_summary_caps_and_gate_when_higher_scores_earned_more() -> None:
     assert top["ci_low"] < top["mean"] < top["ci_high"] and top["n"] == 2 * 21
     assert result["universe"]["status_counts"] == {"OK": 520, "ERROR": 1}
     assert "不代表未來" in result["disclaimer"]
+
+
+def test_overfitting_warning_compares_in_and_out_of_sample_spreads() -> None:
+    config = _config(groups=5, bootstrap_draws=20)
+    when = datetime(2026, 10, 17, tzinfo=UTC)
+    rows, bench = _rows(0.02)
+    same = summary.summarize(rows, _screen(rows), bench, config, when)["overfit"]
+    assert not same["warning"] and same["times"] == pytest.approx(1.0, abs=0.1)
+    rows, bench = _rows(0.02, in_sample_slope=0.05)  # in sample 2.5x the spread
+    result = summary.summarize(rows, _screen(rows), bench, config, when)
+    overfit = result["overfit"]
+    assert overfit["warning"] and overfit["times"] == pytest.approx(2.5, abs=0.15)
+    assert "可能過度擬合" in overfit["message"] and result["passed"]  # a warning only
 
 
 def test_gate_fails_when_scores_do_not_rank_returns() -> None:

@@ -101,6 +101,19 @@ def tuning_attempts(directory: Path) -> int:
         return sum(1 for _ in csv.DictReader(handle))
 
 
+def attempt_auc(directory: Path, attempt: int) -> float | None:
+    """The tool AUC a development attempt logged; None if the attempt is not in the log or
+    had no AUC."""
+    path = directory / TUNING_LOG
+    if not path.exists():
+        return None
+    with path.open(encoding="utf-8", newline="") as handle:
+        for row in csv.DictReader(handle):
+            if int(row["attempt"]) == attempt:
+                return float(row["tool_auc"]) if row["tool_auc"] else None
+    return None
+
+
 def next_attempt(directory: Path, limit: int) -> int:
     done = tuning_attempts(directory)
     if done >= limit:
