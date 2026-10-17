@@ -24,9 +24,12 @@ def fetch(url: str) -> bytes:
         return response.read()
 
 
-# The five largest banks since November 2008 (the central bank's own definition); one sheet
-# each. Column 13 is the one-year time deposit, fixed rate (header rows 2-4 of every sheet).
+# The central bank's five largest banks: 彰銀 until October 2008 (ROC 97/10), 土銀 from
+# November 2008. One sheet each; column 13 is the one-year time deposit, fixed rate (header
+# rows 2-4 of every sheet).
+FIVE_BANKS_BEFORE = ("台銀", "合庫", "一銀", "華銀", "彰銀")
 FIVE_BANKS = ("台銀", "土銀", "合庫", "一銀", "華銀")
+SWITCH_MONTH = "09711"
 ONE_YEAR_FIXED = 13
 
 
@@ -41,14 +44,19 @@ def show_rates(out: Path) -> None:
     book = openpyxl.load_workbook(io.BytesIO(body), read_only=True, data_only=True)
     print("=== sheets:", [s.title for s in book.worksheets])
     by_month: dict[str, list[float]] = {}
-    for title in FIVE_BANKS:
+    for title in dict.fromkeys(FIVE_BANKS_BEFORE + FIVE_BANKS):
         rows = list(book[title].iter_rows(values_only=True))
-        print(f"=== {title} header:", "|".join("" if v is None else str(v) for v in rows[3]))
+        months = []
         for row in rows[5:]:
             month = "" if row[0] is None else str(row[0]).strip()
             value = row[ONE_YEAR_FIXED] if len(row) > ONE_YEAR_FIXED else None
-            if month[:3].isdigit() and len(month) == 5 and int(month[:3]) >= 92 and value:
+            if not (month[:3].isdigit() and len(month) == 5 and value):
+                continue
+            months.append(month)
+            members = FIVE_BANKS if month >= SWITCH_MONTH else FIVE_BANKS_BEFORE
+            if int(month[:3]) >= 92 and title in members:
                 by_month.setdefault(month, []).append(float(value))
+        print(f"=== {title}: {len(months)} months, {min(months)} to {max(months)}")
     # Five-bank average per month, merged into periods of equal rate (percent, 4 decimals).
     periods: list[list] = []
     for month in sorted(by_month):
