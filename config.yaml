@@ -60,6 +60,166 @@ markets:
     # listed in the data-health report; gaps outside them still raise.
     # Format: - { ticker: "1234", start: 2024-03-01, end: 2024-03-15, reason: "..." }
     known_suspensions: []
+    per_share:
+      # Par value before any split/par-value change, for TWSE stocks. TPEx stocks use the
+      # official par from TPEx. Checked against net income / EPS (share_count_tolerance).
+      default_par_value: 10.0
+      # Share multiplier from reference prices vs 1 + stock dividend / par.
+      share_multiplier_tolerance: 0.005
+      # Median ratio of implied shares (net income / EPS) to capital / par must be within
+      # this of 1; a wrong par value is off by a factor of 2 or more.
+      share_count_tolerance: 0.10
+    industries:
+      # Industry = the exchange category from FinMind's listing data. These categories are
+      # boards or broad parents, not industries, and are ignored when a stock has others.
+      ignored_categories: [電子工業, 化學生技醫療, 創新板股票, 存託憑證]
+      # TWSE and TPEx spell some industries differently; peers are pooled under one name.
+      aliases:
+        其他電子類: 其他電子業
+        數位雲端類: 數位雲端
+        居家生活類: 居家生活
+        綠能環保類: 綠能環保
+        運動休閒類: 運動休閒
+        金融業: 金融保險
+        觀光事業: 觀光餐旅
+      # Stocks whose industry is ambiguous. Format: - { ticker: "1234", industry: "半導體業" }
+      overrides: []
+      # Industry groups used by framework rules (proposed defaults to review).
+      groups:
+        financial: [金融保險]
+        construction: [建材營造]
+        semiconductor: [半導體業]
+        mature_electronics: [電子零組件業, 電腦及週邊設備業, 光電業, 通信網路業, 電子通路業,
+                             資訊服務業, 其他電子業]
+        traditional: [水泥工業, 食品工業, 塑膠工業, 紡織纖維, 電機機械, 電器電纜, 化學工業,
+                      玻璃陶瓷, 造紙工業, 鋼鐵工業, 橡膠工業, 汽車工業, 航運業, 油電燃氣業,
+                      貿易百貨]
+        consumer_staples: [食品工業, 貿易百貨]
+        telecom: [通信網路業]
+      peers:
+        # Industry medians need at least this many peers with data in the window.
+        min_peers: 5
+        # Peer statements change only when a new quarter is published, so they are cached
+        # longer than the stock's own data (FinMind's quota makes a full industry slow).
+        cache_max_age_days: 7
+    listing:
+      # Emerging-board (興櫃) trading started on this date. FinMind and Yahoo include a
+      # stock's emerging-board prices before its listing; those are out of scope (no price
+      # limits, not a listed common share) and are dropped.
+      emerging_board_start: 2002-01-02
+      # Listing dates that cannot be derived from the data (a stock that first traded after
+      # emerging_board_start and was listed before valuation_coverage_start).
+      # Format: - { ticker: "1234", listing_date: 2004-03-15, source: "TWSE listing notice" }
+      overrides:
+        - ticker: "3231"
+          listing_date: 2003-08-19
+          source: >-
+            Wistron IPO on TWSE, Aug 2003 (public record); FinMind's first trade is
+            2003-08-19 with no earlier emerging-board trades, and TaiwanStockPER starts only
+            at its 2005-09-02 coverage start.
+        - ticker: "2885"
+          listing_date: 2002-02-04
+          source: >-
+            Yuanta FHC (formerly Fuhwa FHC) listed on formation by share swap; FinMind's first trade is 2002-02-04 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "2886"
+          listing_date: 2002-02-04
+          source: >-
+            Mega FHC (formerly Chiao Tung FHC) listed on formation by share swap; FinMind's first trade is 2002-02-04 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "2887"
+          listing_date: 2002-02-18
+          source: >-
+            Taishin FHC listed on formation by share swap; FinMind's first trade is 2002-02-18 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "2890"
+          listing_date: 2002-05-09
+          source: >-
+            SinoPac FHC listed on formation by share swap; FinMind's first trade is 2002-05-09 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "2891"
+          listing_date: 2002-05-17
+          source: >-
+            CTBC FHC (formerly Chinatrust FHC) listed on formation by share swap; FinMind's first trade is 2002-05-17 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "2892"
+          listing_date: 2003-01-02
+          source: >-
+            First FHC listed on formation by share swap; FinMind's first trade is 2003-01-02 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "3008"
+          listing_date: 2002-03-11
+          source: >-
+            Largan listed on TWSE; FinMind's first trade is 2002-03-11 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "3017"
+          listing_date: 2002-09-27
+          source: >-
+            Asia Vital Components listed on TWSE; FinMind's first trade is 2002-09-27 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "3034"
+          listing_date: 2002-08-26
+          source: >-
+            Novatek listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "3037"
+          listing_date: 2002-08-26
+          source: >-
+            Unimicron listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "3045"
+          listing_date: 2002-08-26
+          source: >-
+            Taiwan Mobile listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "4904"
+          listing_date: 2003-08-01
+          source: >-
+            Far EasTone listed on TWSE; FinMind's first trade is 2003-08-01 and TaiwanStockPER starts only at its
+            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+        - ticker: "6505"
+          listing_date: 2003-12-26
+          source: >-
+            Formosa Petrochemical listed on TWSE; FinMind's first trade is 2003-12-26 and
+            TaiwanStockPER starts only at its 2005-09-02 coverage start. A long-listed large
+            cap, not emerging-board trading.
+    # Prices before a capital change whose reference price is missing from FinMind cannot be
+    # adjusted; such a stock's prices start on the day trading resumed after the last one.
+    # Format: - { ticker: "1234", start: 2009-03-20, reason: "..." }
+    price_history_overrides:
+      - ticker: "2412"
+        start: 2010-02-08
+        reason: >-
+          Capital changes with trading halts in 2008 (2007-12-21 to 2008-01-08), 2009
+          (2009-03-03 to 2009-03-19) and 2010 (2010-01-21 to 2010-02-05) are missing from
+          TaiwanStockCapitalReductionReferencePrice (it starts with the 2011 reduction);
+          without reference prices the resumption days show false jumps (+13.9%, +19.3%).
+      - ticker: "2303"
+        start: 2007-10-09
+        reason: >-
+          Capital change: halted from 2007-09-20, resumed 2007-10-09 at +22.1% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
+      - ticker: "2357"
+        start: 2010-06-24
+        reason: >-
+          Pegatron spin-off: halted from 2010-05-18, resumed 2010-06-24 at +377% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
+      - ticker: "2379"
+        start: 2007-06-25
+        reason: >-
+          Capital change: halted from 2007-06-12, resumed 2007-06-25 at +102% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
+      - ticker: "2408"
+        start: 2009-08-26
+        reason: >-
+          Capital change: halted from 2009-08-13, resumed 2009-08-26 at +177% with no reference price. TaiwanStockCapitalReductionReferencePrice starts in 2011.
+      - ticker: "5347"
+        start: 2007-04-16
+        reason: >-
+          A capital change (halted from 2004-09-29, +78.9% on 2004-10-18) and unexplained limit breaches on 2005-07-08 (-8.3%) and 2007-04-14 (+9.2%); prices before the last breach are excluded. TaiwanStockCapitalReductionReferencePrice starts in 2011.
+      - ticker: "4904"
+        start: 2008-03-28
+        reason: >-
+          Capital change: halted from 2008-03-11, resumed 2008-03-28 at +24.4%, and an
+          unexplained -13.2% on 2004-08-12. TaiwanStockCapitalReductionReferencePrice starts
+          in 2011.
     benchmark:
       # Total-return index matches returns computed from dividend-adjusted prices.
       primary: TAIEX_TOTAL_RETURN
@@ -116,6 +276,9 @@ stability:
     annualized_return: 0.05
     annualized_volatility: 0.05
     dividend_yield: 0.01
+    # Proposed defaults to review: historical drawdown and one-day VaR are fractions too.
+    max_drawdown: 0.10
+    var: 0.01
   # Framework and composite scores (0-1 proportions).
   score_tolerance: 0.15
   alpha: 0.05
@@ -152,6 +315,7 @@ frameworks:
     # "Keeps making new highs": at least one window-high month in this many recent months.
     new_high_lookback_months: 12
   warren_chou:
+    # Core EPS = operating income / shares (same share basis for both quarters).
     max_recent_quarter_eps_yoy_decline: 0.30
     reference_yield_range: [0.05, 0.06]
   guyu:
@@ -170,7 +334,7 @@ frameworks:
     preferred_industries: [financial, consumer_staples, telecom]
   buffett:
     roe_min: 0.15
-    # Spec says "below a threshold" without a value; 0.5 is a proposed default to review.
+    # Interest-bearing borrowings (short-term + long-term + bonds) / total equity.
     debt_to_equity_max: 0.5
     fcf_positive_year_ratio_min: 0.8
   graham:
@@ -206,8 +370,22 @@ scoring:
 data_sources:
   cache_dir: .cache/stock_research
   finmind:
-    # Free tier allows a few hundred requests per hour; stay below it.
-    max_requests_per_hour: 300
+    # Free tier allows 600 requests per hour; stay below it.
+    max_requests_per_hour: 550
+    # The daily export waits out an exhausted quota (status 402) instead of failing the
+    # remaining stocks; interactive commands never wait.
+    quota_retries: 2
+    quota_wait_minutes: 20
+    # First date requested for daily series; each series starts where FinMind's data does
+    # (stock prices from 1994, TAIEX closes and the trading calendar from 1999-01-05).
+    history_start: 1990-01-01
+    # Prices are used from this date on. FinMind's ex-rights/ex-dividend reference prices
+    # (TaiwanStockDividendResult) and the TAIEX total-return index both start in 2003, so
+    # earlier prices cannot be adjusted for dividends and have no matching benchmark.
+    price_history_start: 2003-01-01
+    # First day of TaiwanStockPER, which comes from the exchanges' daily valuation files.
+    # Those cover listed stocks only, so a later first date is the listing date.
+    valuation_coverage_start: 2005-09-02
   official:
     # Minimum delay between requests to TWSE / TPEx / MOPS endpoints.
     min_request_interval_seconds: 3.0
@@ -224,10 +402,10 @@ risk:
   annualization_days: 252
   # Shown next to risk metrics so readers know whether a window contains them.
   major_events:
-    - { name: "2008 global financial crisis", start: 2008-09-01, end: 2009-03-31 }
-    - { name: "2015 price-limit widening to 10%", start: 2015-06-01, end: 2015-06-01 }
-    - { name: "2020 pandemic crash", start: 2020-02-20, end: 2020-06-30 }
-    - { name: "2022 rate hikes and TAIEX correction", start: 2022-01-01, end: 2022-12-31 }
+    - { name: "2008 全球金融海嘯", start: 2008-09-01, end: 2009-03-31 }
+    - { name: "2015 漲跌幅放寬至 10%", start: 2015-06-01, end: 2015-06-01 }
+    - { name: "2020 疫情崩跌", start: 2020-02-20, end: 2020-06-30 }
+    - { name: "2022 升息與台股修正", start: 2022-01-01, end: 2022-12-31 }
 
 technicals:
   sma_windows: [20, 60, 240]
@@ -237,10 +415,106 @@ technicals:
 llm:
   provider: anthropic
   model: claude-opus-5-5
-  temperature: 0.0
+  # This model rejects sampling parameters (temperature); thinking is always on and its depth
+  # is set by effort. Reliability comes from the output schema and program verification.
+  effort: high
+  # Maximum response length (output tokens).
+  max_output: 16000
+  # One retry after a failed call (API error, refusal, schema violation), then FAILED.
   max_retries: 1
   log_dir: logs/llm
+  # MOPS is unreachable from the development environment: annual reports and briefing
+  # decks are read from local files <documents_dir>/<ticker>/<YYYY-MM-DD>_<title>.(pdf|txt|md),
+  # where the date is the publication date.
+  documents_dir: data/documents
+  # Documents are sent newest first; beyond this many characters the oldest are dropped.
+  max_document_chars: 400000
+  # Extracted PDF text is rejected below these quality bars (not sent to the LLM).
+  min_document_chars: 500
+  min_cjk_ratio: 0.2
+  max_replacement_ratio: 0.01
+  # A number in a claim matches a source or computed value within this relative gap.
+  number_tolerance: 0.01
 
 report:
   language: zh-TW
   output_dir: reports
+  # Pages for checking the numbers by hand. Links only: these sites are never scraped.
+  # Placeholders: {code} (e.g. 2330) and {yahoo_symbol} (e.g. 2330.TW / 6488.TWO).
+  reference_links:
+    - { name: "Goodinfo!", url: "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID={code}" }
+    - { name: "Yahoo 奇摩股市", url: "https://tw.stock.yahoo.com/quote/{yahoo_symbol}" }
+    - { name: "鉅亨網", url: "https://www.cnyes.com/twstock/{code}" }
+    - { name: "公開資訊觀測站（輸入代號查詢）", url: "https://mops.twse.com.tw/mops/" }
+
+validation:
+  # Spec §14. Paths are relative to the working directory (the repository root).
+  directory: validation
+  # §14.1: aspect verdict = worst verdict of its metrics; overall = worst aspect.
+  # "營收成長率" is measured by the monthly revenue YoY (the only revenue-growth metric).
+  aspects:
+    revenue: [revenue_yoy]
+    profitability: [roe, gross_margin, operating_margin, eps]
+    risk: [volatility, beta, max_drawdown]
+  known_cases:
+    file: validation/known_cases.yaml
+    as_of: 2026-09-30
+  walk_forward:
+    horizon_months: 3
+    # Base dates are month ends inside each range. Quarantine base dates are never used.
+    dev: { start: 2023-12-31, end: 2025-06-30 }
+    quarantine: { start: 2025-07-01, end: 2025-09-30 }
+    holdout: { start: 2025-10-31, end: 2026-06-30 }
+    # Fixed list chosen before any run: the known cases plus large and mid caps across
+    # industries, all listed before the first base date (see preregistration.md for the
+    # survivorship limitation).
+    universe: [
+      "2603", "2609", "2615", "2382", "3231", "2376", "9921",
+      "2412", "1216", "2912", "9917",
+      "2330", "2317", "2454", "2308", "1301", "2002", "1101", "2881",
+      "6488", "5347", "3008", "2207", "2105",
+    ]
+    # Fewer forward daily returns than this leaves a price outcome unavailable.
+    min_forward_returns: 20
+    max_tuning_attempts: 30
+    # Config paths a dev run may override with --set (spec §14.4 tunable parameters).
+    tunable:
+      - stability.absolute_tolerance
+      - stability.relative_tolerance
+      - weighting.half_life_days
+      - stability.internal_split
+      - stability.crash_exclusion
+    baseline_draws: 1000
+    bootstrap_draws: 1000
+    confidence: 0.95
+    alpha: 0.05
+    seed: 20231231
+  forward_tracking:
+    enabled: true
+    compare_after_months: [6, 12]
+  experts:
+    # Cohen's kappa (tool vs expert majority) must reach kappa_min, or be no lower than
+    # the experts' own kappa minus kappa_margin.
+    kappa_min: 0.6
+    kappa_margin: 0.1
+  # Preregistered success criteria (§14.2); preregistration.md restates them.
+  success:
+    known_cases_accuracy: 0.80
+    report_score_margin: 0.5
+
+app:
+  # Static web app (add to the iPhone home screen) fed by a daily batch export.
+  # The export analyses every stock below at today's date; stocks that fail the data checks
+  # are published with the failed checks, never with older data.
+  watchlist: [
+    "2330", "2317", "2454", "2308", "2382", "2303", "3711", "2357", "3231", "2376",
+    "3008", "2379", "3034", "2408", "3037", "2345", "6669", "3017", "2395", "6488",
+    "5347", "2412", "2327", "4904", "2881", "2882", "2891", "2886", "2892", "5880",
+    "2880", "2885", "2801", "2890", "1301", "1303", "1326", "6505", "2002", "1101",
+    "1216", "2912", "2207", "9910", "9921", "9917", "2603", "2609", "2615", "1476",
+  ]
+  # Industry medians need every peer's statements: too many requests for a daily run on
+  # FinMind's free tier, so framework items that need them show as unavailable.
+  with_peers: false
+  # A published dataset older than this is flagged as stale in the app.
+  stale_after_hours: 36

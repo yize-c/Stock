@@ -36,6 +36,75 @@
 - 櫃買中心 OpenAPI 只有當日／當月資料；Yahoo 的 Close 已做分割調整（台股配股也被當成分割），成交量與官方不一致，不可當準。
 - 已知停牌放 `markets.tw.known_suspensions`，清單內缺資料視為正常，清單外仍報錯。
 
+## 第 3 階段實作時發現的資料限制（使用者已同意）
+- FinMind 免費版拿不到還原股價（`TaiwanStockPriceAdj` 需付費），改由程式用除權息、減資、分割的參考價自行還原（`data/adjustment.py`）；`as_of` 之後的事件不套用。
+- FinMind 除權息參考價與加權報酬指數都從 2003 年開始 → 股價只用 2003 年起（`data_sources.finmind.price_history_start`）。
+- FinMind／Yahoo 股價含上市前的興櫃交易，一律剔除。上市日 = 首次交易後 `TaiwanStockPER` 的第一天（只涵蓋上市櫃股票）；上櫃股票再與櫃買中心官方上櫃日比對；推不出來的放 `markets.tw.listing.overrides`。
+- 財報沒有公告日、只有最新版本 → `available_date` 用法定期限、標 `latest_only`，每次抓取存不可覆寫快照。月營收公告日用 FinMind 建檔日與法定期限較早者。
+- 減資、分割、面額變更前的停止買賣期間由事件資料推得，視為已知停牌（INFO）。
+- 未來休市日取自 FinMind `TaiwanStockTradingDate`（轉載證交所行事曆），歷史部分必須與加權指數收盤日一致。
+
+## 第 4 階段的做法（使用者已同意）
+- 每股數據用事件回溯調整（`data/shares.py`）：股數倍數 =（前一日收盤 − 現金股利）÷ 參考價，與「1 + 股票股利 ÷ 面額」交叉驗證；面額上櫃用櫃買官方值、上市預設 10 元（config）並隨面額變更事件調整；「普通股股本 ÷ 面額」與「歸屬母公司淨利 ÷ EPS」的股數比對不一致就報錯。只從 IFRS 起點（2013）開始調整。
+- 中央銀行網站（cbc.gov.tw）被雲端環境的網路政策擋下 → Sharpe 用 `markets.tw.risk_free.fallback_rates`，沒填滿版本期間就報錯。
+- 月營收年增率（使用者授權自行決定）：比較月與基期月都要在同一版本內（V1 第一個為 2021-01，V3 最後一個為 2019-12），與 TTM 規則一致。
+
+## 第 5 階段的做法（使用者已同意）
+- CPI：使用者要開通主計總處網域；目前本 session 仍被網路政策擋下 → 華倫「年增率高於通膨」在沒有新高時判未通過，有新高時為「資料不足」，CPI fetcher 等能連線、取得真實回應後再寫。
+- 同產業中位數：抓同產業全部上市櫃普通股（不跳過；任一家抓取失敗 → 中位數不可用），同業財報快取 7 天（`markets.tw.industries.peers`）；產業別取最細分類，略過「電子工業」等大類，上市／上櫃不同寫法用 aliases 合併。
+- Buffett 負債權益比 = 有息負債（短借＋長借＋公司債）÷ 權益，門檻 0.5。
+- 華倫本業 EPS = 營業利益 ÷ 股數（同一股數基準），去年同期 ≤ 0 為不適用。
+- 產業群組（金融、營建、半導體、成熟電子、傳產、民生、電信）放 `markets.tw.industries.groups`，使用者授權沿用此預設值。
+
+## 第 6 階段的做法（使用者授權自行判斷）
+- 新增 scipy、statsmodels（使用者授權）。
+- 經濟差距：比率用百分點、一般數值用「差 ÷ 兩者絕對值較大者」、分數用 0.15、通過／未通過要相同；剛好等於容忍度算差距小。新增 `max_drawdown`（0.10）、`var`（0.01）的百分點容忍度（使用者授權沿用）。
+- BH 校正分三組：步驟 A、步驟 B 含崩跌、步驟 B 排除崩跌。
+- V1 內部：兩種算法都不穩定才不穩定；任一穩定就穩定；其餘為 UNKNOWN。框架項目、分數與估值時點值沒有「排除崩跌」版本。
+- V1 前後兩段多半湊不滿 5 個年度，框架項目在 V1 與 V3 不一致時通常判為 UNSTABLE（依規則表的 UNKNOWN → UNSTABLE）。
+- LOW_SAMPLE 只用於有觀察值數量的指標與時點值；框架項目與分數不加。
+- Quandt-Andrews 臨界值用 Andrews (1993) 15% 修剪的 F 版本（q=1: 7.12/8.68/12.16；q=2: 5.00/5.86/7.78），已用模擬資料確認；只當資訊，不影響判定。
+
+## 第 7 階段的做法（使用者授權自行判斷）
+- 新增 anthropic（官方 SDK）、pdfplumber（PDF 抽字，MIT）。
+- 模型 `claude-opus-5-5` 不接受 temperature → config 改為 `effort`；結構化輸出用 JSON schema；`fallbacks: "default"` 處理拒答；串流呼叫；失敗重試一次；每次呼叫寫入 `logs/llm/*.jsonl`。
+- MOPS 被擋（回傳安全性封鎖頁），FinMind 新聞只有標題與連結 → 年報等文件改由使用者手動放到 `data/documents/<代號>/YYYY-MM-DD_標題.(pdf|txt|md)`（日期為公告日，已加入 .gitignore）；抽字品質不合格的文件不送 LLM 並列出原因。
+- 引用驗證：NFKC、去空白、標點統一、不做繁簡轉換；數字驗證支援中文數字與兆／億／萬、百分之、%；年／月／季、V1／Q4 這類標籤不當數字。
+- 目前環境沒有 ANTHROPIC_API_KEY，LLM 層只用 mock 測試，尚未實際呼叫。
+
+## 第 8 階段的做法（使用者授權自行判斷）
+- `analyze` 先跑資料檢查，未通過就輸出資料健康報告並以 exit 1 結束，不產生分析。報告寫入 `reports/<代號>_<as_of>.md`。
+- 報告欄位順序固定 V1、V3、V2（V2 只當參考）；`--compare` 另產生多檔比較表。
+- 技術指標只描述（高於／低於均線、RSI、MACD），並註明實證效果有爭議，不輸出訊號。
+- 外部參考連結（Goodinfo、Yahoo 奇摩股市、鉅亨網、MOPS）放 `report.reference_links`；重大事件名稱改中文。
+
+## 第 9 階段的做法（使用者授權自行判斷）
+- `.claude/settings.json`：允許 pytest、ruff、uv sync；git push、uv add、curl、WebFetch 與會連網的 `stock-research validate/analyze/breakpoints/validation` 需詢問；禁止讀 `.env`。
+- Hooks（`.claude/hooks/`，只用標準函式庫，測試在 `tests/test_hooks.py`）：
+  - `format_and_test.py`：編輯 Python 檔後跑 `ruff format` 與 import 該模組的測試，失敗回報給 Claude。
+  - `guard_secrets.py`：`git commit` 前掃描所有可能被提交的變更（含未追蹤檔），發現 `.env`、環境變數／`.env` 中 token 的值、或 Anthropic key／JWT 形狀字串就擋下。
+  - `protect_forward_log.py`：`validation/forward_log/` 已存在的檔案不可修改；shell 指令以該資料夾為寫入、搬移、刪除目標一律擋下（heredoc 內容不算）。
+- Subagents：`data-auditor`、`report-reviewer`、`validation-reviewer`（唯讀）；Skill `stock-analysis`；指令 `/analyze <代號>` 跑分析後交給 report-reviewer。
+- 保留期的執行限制在第 10 階段由程式檢查（`preregistration.md` 未 commit 就拒絕 `--phase holdout`）。
+
+## 第 10 階段的做法（使用者授權自行判斷）
+- 新增 pyarrow（規格要求 parquet 輸出）。程式放 `src/stock_research/validation/`（可測試），紀錄放 `validation/`。
+- 面向：營收 = 月營收年增率（規格的「營收成長率」也用它衡量）；獲利 = ROE、毛利率、營業利益率、EPS；風險 = 波動度、Beta、最大回撤。
+- walk-forward 的預測 = 判定為 UNSTABLE（STABLE、REGIME_SHIFT 表示 V1 能代表現在）；最大回撤的 V1 參考值 = V1 內 H 個月區塊回撤的中位數。
+- 保留期防護：`preregistration.md` 已 commit、無修改、`Status: FINAL`、`Config SHA-256` 與已 commit 的 config 一致，且 `results/holdout_lock.json` 不存在；開始時寫入鎖檔。
+- 已知案例由 Claude 依公開資訊標註（使用者授權），待使用者或專家檢視；walk-forward 樣本是固定的 24 支股票，有倖存者偏差，需在結果中註明。
+- 第 10 階段跑真實資料時發現：跨來源比對原本只排除比對窗口內、配股前的日期，更早的日期會被補進窗口（9917 失敗）→ 改為排除最後一次股數基準變動前的所有日期。
+- FinMind 減資參考價從 2011 年開始，更早的減資（例：中華電 2008–2010）無法還原 → `markets.tw.price_history_overrides` 讓該股股價從最後一次缺資料的停牌後開始，並寫明原因。
+- `analyze` 在 as_of 為今天時寫入 `validation/forward_log/`（`--no-forward-log` 可關閉）。
+
+## 網頁 App（使用者決定）
+- 形式：PWA（Safari 加到主畫面），不是原生 iOS App；`web/` 為純 HTML/JS，不需建置，不計算任何數字。
+- 範圍：`app.watchlist` 約 50 支；每日由 GitHub Actions（台北 04:17，週一至週五）跑 `stock-research export`，部署到 GitHub Pages（repo 需公開，`FINMIND_TOKEN` 放 GitHub Secret）。
+- 每日匯出不抓同業（`app.with_peers: false`），需產業中位數的框架項目顯示為不可用。FinMind 請求上限調為每小時 550（免費版 600）。
+- 第一次全跑（50 支）：12 支需上市日 override（2002–2003 年才有首筆交易的金控與大型股）、6 支需股價起點 override（FinMind 缺 2011 年前的減資）；台新金（特別股）與台灣大（子公司持有庫藏股）的股數交叉驗證不一致，屬模型限制，換成彰銀、國巨。
+- 每日匯出遇到 FinMind 額度用完（402）會等待後重試（`quota_retries`、`quota_wait_minutes`），互動指令不等待。
+- 資料檢查未通過的股票照樣列出並顯示失敗項目，不用舊資料替代；資料超過 `app.stale_after_hours` 未更新時 App 顯示警告。
+
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |
 |---|---|---|---|
@@ -94,6 +163,11 @@ uv sync                                  # 安裝依賴
 uv run ruff check . && uv run ruff format --check .
 uv run pytest --cov=stock_research       # 測試 + 覆蓋率
 uv run stock-research config show        # 驗證並顯示 config
+uv run stock-research validate 2330      # 資料驗證 + 資料健康報告（需 FINMIND_TOKEN）
+uv run stock-research analyze 2330       # 完整分析報告 → reports/2330_<as_of>.md
+uv run stock-research breakpoints 2330   # 結構斷點掃描（僅供參考）
+uv run stock-research validation run known-cases              # 已知案例測試
+uv run stock-research validation run walk-forward --phase dev # 開發期（每次都是一次調參嘗試）
 ```
 
 ## 程式風格

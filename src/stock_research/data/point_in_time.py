@@ -26,6 +26,10 @@ class PeriodType(StrEnum):
     MONTH = "month"
     QUARTER = "quarter"
     ANNUAL = "annual"
+    # Cumulative from the start of the fiscal year (Taiwan cash-flow statements).
+    YEAR_TO_DATE = "year_to_date"
+    # A balance at one date: period_start == period_end (balance sheets).
+    INSTANT = "instant"
 
 
 class VersionKind(StrEnum):

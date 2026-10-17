@@ -1,0 +1,73 @@
+# Known-case test (spec §14.3). Expected changes between V3 (before 2020) and V1 (2020 on),
+# written BEFORE the tool was run on these stocks. Values: changed / unchanged.
+#
+# Labeler note: the user delegated this list ("一切你自己判斷"). The labels below are Claude's
+# judgement from widely reported company history, not an expert panel's; a user or expert
+# review should replace or confirm them (add a dated note below; never edit silently after
+# results exist).
+labeled_by: "Claude (delegated by the user; pending user/expert review)"
+labeled_on: 2026-10-16
+cases:
+  # --- Widely reported as changed after the pandemic ---------------------------------------
+  - code: "2603"
+    name: 長榮
+    expected: { revenue: changed, profitability: changed, risk: changed }
+    reason: >-
+      Container freight rates spiked in 2021-2022 and collapsed in 2023: revenue swung by
+      multiples, margins and ROE reached levels never seen before 2020, and the share price
+      became far more volatile.
+  - code: "2609"
+    name: 陽明
+    expected: { revenue: changed, profitability: changed, risk: changed }
+    reason: >-
+      Same freight cycle as Evergreen; Yang Ming went from years of losses before 2020 to
+      record profits, then a sharp reversal.
+  - code: "2615"
+    name: 萬海
+    expected: { revenue: changed, profitability: changed, risk: changed }
+    reason: Same container freight cycle (intra-Asia carrier).
+  - code: "2382"
+    name: 廣達
+    expected: { revenue: changed, profitability: changed, risk: changed }
+    reason: >-
+      AI server demand from 2023 changed the revenue mix and growth; gross margin moved above
+      its notebook-era range; the stock re-rated with much higher volatility.
+  - code: "3231"
+    name: 緯創
+    expected: { revenue: changed, profitability: changed, risk: changed }
+    reason: >-
+      Exited the iPhone assembly business (2020-2023) and became an AI server supplier;
+      margins rose and the share price became much more volatile.
+  - code: "2376"
+    name: 技嘉
+    expected: { revenue: changed, profitability: changed, risk: changed }
+    reason: >-
+      Pandemic PC/graphics-card boom, crypto-mining bust, then AI servers: revenue and margin
+      swings and share-price volatility well beyond its pre-2020 history.
+  - code: "9921"
+    name: 巨大
+    expected: { revenue: changed, profitability: changed, risk: changed }
+    reason: >-
+      Pandemic bicycle boom in 2020-2022 followed by an inventory glut from 2023: revenue
+      growth reversed sharply and profits fell well below the boom years.
+  # --- Widely regarded as stable over the long run ------------------------------------------
+  - code: "2412"
+    name: 中華電
+    expected: { revenue: unchanged, profitability: unchanged, risk: unchanged }
+    reason: >-
+      Dominant telecom operator with regulated, recurring revenue; margins, ROE and low
+      volatility were similar before and after 2020.
+  - code: "1216"
+    name: 統一
+    expected: { revenue: unchanged, profitability: unchanged, risk: unchanged }
+    reason: Food and retail holding company with steady demand and steady margins.
+  - code: "2912"
+    name: 統一超
+    expected: { revenue: unchanged, profitability: unchanged, risk: unchanged }
+    reason: >-
+      7-ELEVEN Taiwan: steady store growth and margins; the 2020 dip was temporary and is
+      covered by the crash exclusion.
+  - code: "9917"
+    name: 中保科
+    expected: { revenue: unchanged, profitability: unchanged, risk: unchanged }
+    reason: Security services with long contracts; low growth, stable margins, low volatility.

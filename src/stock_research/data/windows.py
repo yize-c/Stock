@@ -29,6 +29,12 @@ class WindowName(StrEnum):
     POST_2020 = "post_2020"
     FULL = "full"
     PRE_2020 = "pre_2020"
+    # The two halves of V1, compared in the stability check's step B (spec §5.2).
+    POST_2020_EARLY = "post_2020_early"
+    POST_2020_LATE = "post_2020_late"
+
+
+MAIN_WINDOWS = (WindowName.POST_2020, WindowName.FULL, WindowName.PRE_2020)
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +153,9 @@ class TimeWindow:
 
 def build_window(name: WindowName | str, config: AppConfig, as_of: date) -> TimeWindow:
     name = WindowName(name)
+    if name in (WindowName.POST_2020_EARLY, WindowName.POST_2020_LATE):
+        early, late = v1_halves(config, as_of)
+        return early if name is WindowName.POST_2020_EARLY else late
     split = config.general.regime_split_date
     if as_of < split:
         raise ValueError(f"as_of {as_of} is before the regime split {split}; V1 would be empty")
@@ -191,7 +200,51 @@ def build_window(name: WindowName | str, config: AppConfig, as_of: date) -> Time
 
 
 def build_windows(config: AppConfig, as_of: date) -> dict[WindowName, TimeWindow]:
-    return {name: build_window(name, config, as_of) for name in WindowName}
+    """V1, V2 and V3."""
+    return {name: build_window(name, config, as_of) for name in MAIN_WINDOWS}
+
+
+def v1_split_date(config: AppConfig, as_of: date) -> date:
+    """First day of V1's second half: V1's midpoint (moves with ``as_of``) or a fixed date."""
+    split = config.stability.internal_split
+    start = config.general.regime_split_date
+    if split.mode == "fixed":
+        assert split.fixed_date is not None
+        if not start < split.fixed_date <= as_of:
+            raise ValueError(f"internal_split.fixed_date {split.fixed_date} is outside V1")
+        return split.fixed_date
+    return start + timedelta(days=(as_of - start).days // 2 + 1)
+
+
+def v1_halves(config: AppConfig, as_of: date) -> tuple[TimeWindow, TimeWindow]:
+    """V1 cut in two. Each half sees prices, periods and text inside its own range only;
+    data availability is still ``as_of``. Weights age from each half's last day."""
+    start = config.general.regime_split_date
+    cut = v1_split_date(config, as_of)
+    end_early = cut - timedelta(days=1)
+    early = TimeWindow(
+        name=WindowName.POST_2020_EARLY,
+        as_of=as_of,
+        price_start=start,
+        price_end=end_early,
+        financial_start=start,
+        financial_end=end_early,
+        text_start=start,
+        text_end=end_early,
+        weight_reference_date=end_early,
+    )
+    late = TimeWindow(
+        name=WindowName.POST_2020_LATE,
+        as_of=as_of,
+        price_start=cut,
+        price_end=as_of,
+        financial_start=cut,
+        financial_end=as_of,
+        text_start=cut,
+        text_end=as_of,
+        weight_reference_date=as_of,
+    )
+    return early, late
 
 
 def _as_dates(series: pd.Series) -> pd.Series:

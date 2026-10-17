@@ -1,0 +1,64 @@
+name: Daily export
+
+# Analyse the app watchlist before the Taiwan market opens and publish the web app to
+# GitHub Pages. 20:17 UTC Sun-Thu = 04:17 Asia/Taipei Mon-Fri (GitHub may start scheduled
+# runs late; the export takes about an hour on FinMind's free tier).
+# Scheduled workflows only run from the default branch.
+on:
+  schedule:
+    - cron: "17 20 * * 0-4"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Restore data cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .cache/stock_research
+          key: finmind-cache-${{ github.run_id }}
+          restore-keys: finmind-cache-
+      - name: Export watchlist
+        env:
+          FINMIND_TOKEN: ${{ secrets.FINMIND_TOKEN }}
+        run: |
+          mkdir -p site
+          cp -r web/. site/
+          uv run stock-research export --out site
+      - name: Save data cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .cache/stock_research
+          key: finmind-cache-${{ github.run_id }}
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: export
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

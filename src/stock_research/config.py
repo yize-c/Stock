@@ -149,6 +149,67 @@ class KnownSuspension(_Model):
         return self.start <= day <= self.end
 
 
+class PerShareConfig(_Model):
+    default_par_value: PositiveFloat
+    share_multiplier_tolerance: Fraction
+    share_count_tolerance: Fraction
+
+
+class IndustryOverride(_Model):
+    ticker: Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]
+    industry: str = Field(min_length=1)
+
+
+class PeerConfig(_Model):
+    min_peers: PositiveInt
+    cache_max_age_days: PositiveFloat
+
+
+class IndustryConfig(_Model):
+    ignored_categories: list[str]
+    aliases: dict[str, str]
+    overrides: list[IndustryOverride]
+    groups: dict[str, list[str]]
+    peers: PeerConfig
+
+    @model_validator(mode="after")
+    def _check(self) -> IndustryConfig:
+        tickers = [o.ticker for o in self.overrides]
+        if len(set(tickers)) != len(tickers):
+            raise ValueError("industries.overrides contains duplicate tickers")
+        aliased = sorted(set(self.aliases) & {i for g in self.groups.values() for i in g})
+        if aliased:
+            raise ValueError(f"industry groups must use canonical names, not aliases: {aliased}")
+        return self
+
+
+class ListingOverride(_Model):
+    ticker: Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]
+    listing_date: date
+    source: str = Field(min_length=1)
+
+
+class PriceHistoryOverride(_Model):
+    """A later price start for one stock, when an earlier capital change lacks the reference
+    price needed to adjust its prices (FinMind's capital-reduction data starts in 2011)."""
+
+    ticker: Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]
+    start: date
+    reason: str = Field(min_length=1)
+
+
+class ListingConfig(_Model):
+    emerging_board_start: date
+    overrides: list[ListingOverride]
+
+    @model_validator(mode="after")
+    def _check_unique(self) -> ListingConfig:
+        tickers = [o.ticker for o in self.overrides]
+        if len(set(tickers)) != len(tickers):
+            raise ValueError("listing.overrides contains duplicate tickers")
+        return self
+
+
 class TwBenchmarkConfig(_Model):
     primary: str
     fallback_ticker: str
@@ -195,6 +256,10 @@ class TwMarketConfig(_Model):
     filing_deadlines: FilingDeadlineConfig
     trading_calendar: TradingCalendarConfig
     known_suspensions: list[KnownSuspension]
+    per_share: PerShareConfig
+    industries: IndustryConfig
+    listing: ListingConfig
+    price_history_overrides: list[PriceHistoryOverride]
     benchmark: TwBenchmarkConfig
     risk_free: RiskFreeConfig
     industry_classification: str
@@ -419,6 +484,18 @@ class ScoringConfig(_Model):
 
 class FinMindConfig(_Model):
     max_requests_per_hour: PositiveInt
+    # Batch export only: on an exhausted quota (HTTP 402) wait this long and retry.
+    quota_retries: Annotated[int, Field(ge=0)]
+    quota_wait_minutes: PositiveFloat
+    history_start: date
+    price_history_start: date
+    valuation_coverage_start: date
+
+    @model_validator(mode="after")
+    def _check_order(self) -> FinMindConfig:
+        if not self.history_start <= self.price_history_start:
+            raise ValueError("price_history_start must not be before history_start")
+        return self
 
 
 class OfficialSourceConfig(_Model):
@@ -478,14 +555,139 @@ class TechnicalsConfig(_Model):
 class LlmConfig(_Model):
     provider: Literal["anthropic"]
     model: str = Field(min_length=1)
-    temperature: Annotated[float, Field(ge=0.0, le=1.0)]
+    effort: Literal["low", "medium", "high", "xhigh", "max"]
+    max_output: PositiveInt
     max_retries: Annotated[int, Field(ge=0)]
     log_dir: Path
+    documents_dir: Path
+    max_document_chars: PositiveInt
+    min_document_chars: PositiveInt
+    min_cjk_ratio: Fraction
+    max_replacement_ratio: Fraction
+    number_tolerance: Fraction
+
+
+class ReferenceLink(_Model):
+    name: str = Field(min_length=1)
+    url: str = Field(pattern=r"^https://")
 
 
 class ReportConfig(_Model):
     language: Literal["zh-TW"]
     output_dir: Path
+    reference_links: list[ReferenceLink]
+
+
+# --- validation (spec §14) -----------------------------------------------------------------
+
+Aspect = Literal["revenue", "profitability", "risk"]
+
+
+class DateRange(_Model):
+    start: date
+    end: date
+
+    @model_validator(mode="after")
+    def _ordered(self) -> DateRange:
+        if self.start > self.end:
+            raise ValueError(f"start {self.start} is after end {self.end}")
+        return self
+
+
+def add_months(day: date, months: int) -> date:
+    """Same day ``months`` later; month ends map to month ends (2023-11-30 + 3 = 2024-02-29)."""
+    month = day.month - 1 + months
+    year, month = day.year + month // 12, month % 12 + 1
+    last = (date(year + month // 12, month % 12 + 1, 1) - date.resolution).day
+    is_month_end = (day + date.resolution).month != day.month
+    return date(year, month, last if is_month_end else min(day.day, last))
+
+
+class KnownCasesConfig(_Model):
+    file: Path
+    as_of: date
+
+
+class WalkForwardConfig(_Model):
+    horizon_months: PositiveInt
+    dev: DateRange
+    quarantine: DateRange
+    holdout: DateRange
+    universe: list[str] = Field(min_length=1)
+    min_forward_returns: PositiveInt
+    max_tuning_attempts: PositiveInt
+    tunable: list[str]
+    baseline_draws: PositiveInt
+    bootstrap_draws: PositiveInt
+    confidence: Annotated[float, Field(gt=0.5, lt=1.0)]
+    alpha: Annotated[float, Field(gt=0.0, lt=0.5)]
+    seed: int
+
+    @model_validator(mode="after")
+    def _phases(self) -> WalkForwardConfig:
+        if not self.dev.end < self.quarantine.start <= self.quarantine.end < self.holdout.start:
+            raise ValueError("phases must be ordered: dev < quarantine < holdout")
+        if add_months(self.dev.end, self.horizon_months) > self.quarantine.end:
+            raise ValueError(
+                "dev outcomes would reach past the quarantine: dev.end + horizon_months "
+                f"= {add_months(self.dev.end, self.horizon_months)} > {self.quarantine.end}"
+            )
+        if len(set(self.universe)) != len(self.universe):
+            raise ValueError("walk_forward.universe has duplicates")
+        return self
+
+    def outcome_limit(self, phase: Literal["dev", "holdout"]) -> date:
+        """Last date a phase's outcomes may use."""
+        if phase == "dev":
+            return self.quarantine.end
+        return add_months(self.holdout.end, self.horizon_months)
+
+
+class ForwardTrackingConfig(_Model):
+    enabled: bool
+    compare_after_months: list[PositiveInt]
+
+
+class ExpertsConfig(_Model):
+    kappa_min: Annotated[float, Field(ge=-1.0, le=1.0)]
+    kappa_margin: Fraction
+
+
+class SuccessConfig(_Model):
+    known_cases_accuracy: Fraction
+    report_score_margin: PositiveFloat
+
+
+class ValidationConfig(_Model):
+    directory: Path
+    aspects: dict[Aspect, list[str]]
+    known_cases: KnownCasesConfig
+    walk_forward: WalkForwardConfig
+    forward_tracking: ForwardTrackingConfig
+    experts: ExpertsConfig
+    success: SuccessConfig
+
+    @model_validator(mode="after")
+    def _all_aspects(self) -> ValidationConfig:
+        missing = {"revenue", "profitability", "risk"} - set(self.aspects)
+        if missing or any(not keys for keys in self.aspects.values()):
+            raise ValueError(f"every aspect needs at least one metric (missing: {missing})")
+        return self
+
+
+# --- app export ---------------------------------------------------------------------------
+
+
+class AppExportConfig(_Model):
+    watchlist: list[Annotated[str, Field(pattern=r"^[1-9]\d{3}$")]] = Field(min_length=1)
+    with_peers: bool
+    stale_after_hours: PositiveInt
+
+    @model_validator(mode="after")
+    def _unique(self) -> AppExportConfig:
+        if len(set(self.watchlist)) != len(self.watchlist):
+            raise ValueError("app.watchlist has duplicates")
+        return self
 
 
 # --- root ---------------------------------------------------------------------------------
@@ -503,6 +705,8 @@ class AppConfig(_Model):
     technicals: TechnicalsConfig
     llm: LlmConfig
     report: ReportConfig
+    validation: ValidationConfig
+    app: AppExportConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:
@@ -515,6 +719,16 @@ class AppConfig(_Model):
         fixed = self.stability.internal_split.fixed_date
         if fixed is not None and fixed <= split:
             raise ValueError("internal_split.fixed_date must be after regime_split_date")
+        groups = set(self.markets.tw.industries.groups)
+        fw = self.frameworks
+        used = {
+            *fw.guyu.excluded_industries,
+            *fw.guyu.expected_roe_by_industry,
+            *fw.chen_chung_ming.preferred_industries,
+            "financial",
+        }
+        if used - groups:
+            raise ValueError(f"industry groups used by frameworks are undefined: {used - groups}")
         if not getattr(self.markets, self.general.default_market).enabled:
             raise ValueError(f"default_market '{self.general.default_market}' is not enabled")
         return self
