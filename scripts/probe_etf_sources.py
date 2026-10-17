@@ -61,17 +61,18 @@ def show(url: str, *, max_lines: int = 60, raw: int = 0) -> str:
 
 
 def closes() -> None:
-    print("##### official closes, 5347 September 2024")
-    status, _, text = fetch(
-        "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
-        "?code=5347&date=2024%2F09%2F01&response=json"
-    )
-    print(f"=== TPEx tradingStock 5347 2024-09 -> {status}")
-    try:
-        for row in json.loads(text)["tables"][0]["data"]:
-            print("  ", row[0], "close", row[6])
-    except (ValueError, KeyError, IndexError):
-        print("  ", text[:200])
+    print("##### official closes, 2024-03-29 (third batch)")
+    for code in ("2317", "2454", "1101"):
+        status, _, text = fetch(
+            "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY"
+            f"?date=20240301&stockNo={code}&response=json"
+        )
+        print(f"=== TWSE STOCK_DAY {code} 2024-03 -> {status}")
+        try:
+            for row in json.loads(text).get("data", [])[-3:]:
+                print("  ", row[0], "close", row[6])
+        except ValueError:
+            print("  ", text[:200])
 
 
 def opener() -> urllib.request.OpenerDirector:
@@ -174,7 +175,7 @@ def etf_sources() -> None:
 
 
 def main() -> int:
-    for part in (closes, etf_sources):
+    for part in (closes,):
         try:
             part()
         except Exception as exc:  # report and continue with the next part
