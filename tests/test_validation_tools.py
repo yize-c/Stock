@@ -577,6 +577,36 @@ def test_cli_dev_run_logs_the_attempt(
     assert wf.tuning_attempts(tmp_path / "validation") == 2
 
 
+def test_cli_dev_run_logs_the_commit_from_the_start(
+    tmp_path, monkeypatch, report, write_config, raw_config
+) -> None:
+    """A run takes hours; commits made meanwhile must not be logged as the code that ran."""
+    from stock_research.validation import preregistration
+
+    raw_config["validation"]["walk_forward"].update(
+        {"universe": ["1234"], "baseline_draws": 10, "bootstrap_draws": 10}
+    )
+    path = write_config(raw_config)
+    head = {"commit": ("start", True)}
+    monkeypatch.setattr(preregistration, "git_commit", lambda root=Path(): head["commit"])
+    monkeypatch.setattr(cli, "open_market_data", lambda cfg, **_: FakeMarket())
+    monkeypatch.setattr(wf, "load_stock_data", _fake_loader)
+    monkeypatch.setattr(wf, "stability_report", lambda data, cfg, **_: report)
+    real_run = wf.run_walk_forward
+
+    def run_then_commit(*args, **kwargs):
+        result = real_run(*args, **kwargs)
+        head["commit"] = ("later", False)  # someone commits while the run is going
+        return result
+
+    monkeypatch.setattr(wf, "run_walk_forward", run_then_commit)
+    args = ["validation", "run", "walk-forward", "--phase", "dev", "--config", str(path)]
+    assert runner.invoke(app, args).exit_code == 0
+    with (tmp_path / "validation" / wf.TUNING_LOG).open() as handle:
+        row = next(csv.DictReader(handle))
+    assert (row["git_commit"], row["git_dirty"]) == ("start", "True")
+
+
 # --- known cases -----------------------------------------------------------------------------
 
 

@@ -345,13 +345,14 @@ def run_walk_forward_command(
             raise typer.Exit(code=1) from exc
     market_data = _open(cfg, batch=True)
     started = market_data.now
+    # The code that runs is the code at the start; a long run must not log a later commit.
+    commit, dirty = git_commit()
     if phase == "holdout":
         acquire_holdout_lock(directory, registration, started)
     run = wf.run_walk_forward(market_data, cfg, phase, attempt=attempt, progress=_echo)  # type: ignore[arg-type]
     wf.append_rows(directory, run.rows)
     attempts = None
     if phase == "dev":
-        commit, dirty = git_commit()
         wf.append_tuning_log(directory, wf.tuning_row(run, applied, started, commit, dirty))
         attempts = wf.tuning_attempts(directory)
     text = render_walk_forward(run, settings.confidence, attempts)
