@@ -214,6 +214,7 @@ class TwBenchmarkConfig(_Model):
     primary: str
     fallback_ticker: str
     fallback_uses_adjusted_prices: bool
+    compare_etf: str
 
 
 class RiskFreeRate(_Model):
@@ -719,6 +720,19 @@ class BacktestConfig(_Model):
         return self
 
 
+# --- trading costs (spec v2 §3) --------------------------------------------------------------
+
+
+class CostsConfig(_Model):
+    fee_rate: Fraction
+    fee_discount: Annotated[float, Field(gt=0.0, le=1.0)]
+    min_fee: Annotated[float, Field(ge=0.0)]
+    tax_stock: Fraction
+    tax_etf: Fraction
+    board_lot: PositiveInt
+    reference_position: PositiveFloat
+
+
 # --- root ---------------------------------------------------------------------------------
 
 
@@ -737,6 +751,7 @@ class AppConfig(_Model):
     validation: ValidationConfig
     app: AppExportConfig
     backtest: BacktestConfig
+    costs: CostsConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:

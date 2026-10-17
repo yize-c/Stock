@@ -351,6 +351,21 @@ class MarketData:
             self._memo.raw[ticker.code] = (raw, events)
         return self._memo.raw[ticker.code]
 
+    def etf_prices(self, code: str, as_of: date) -> AdjustedPrices:
+        """An ETF's dividend-adjusted prices from ``price_history_start`` (no listing check:
+        ETFs have no P/E series to derive one from)."""
+        if code not in self._memo.raw:
+            start = self._config.data_sources.finmind.history_start
+            today = self.today()
+            self._memo.raw[code] = (
+                self._finmind.prices(code, start, today),
+                self._finmind.price_events(code, start, today),
+            )
+        raw, events = self._memo.raw[code]
+        start = self._config.data_sources.finmind.price_history_start
+        raw = raw.loc[pd.to_datetime(raw["date"]) >= pd.Timestamp(start)]
+        return adjust_prices(code, raw.reset_index(drop=True), events, as_of)
+
     def benchmark(self, as_of: date) -> pd.DataFrame:
         """TAIEX total-return index (dividends included) on or before ``as_of``."""
         tri = self._finmind.total_return_index(

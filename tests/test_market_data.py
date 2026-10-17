@@ -47,7 +47,20 @@ def base_routes() -> dict:
         ("TaiwanStockCashFlowsStatement", "2330"): "finmind_cashflow_2330_2019.json",
         ("TaiwanStockMonthRevenue", "2330"): "finmind_month_revenue_2330_recent.json",
         ("TaiwanStockDividend", "2330"): "finmind_dividend_2330.json",
+        # 0050 stand-in for the ETF comparison: 2330's rows, scaled.
+        ("TaiwanStockPrice", "0050"): etf_rows(),
+        ("TaiwanStockDividendResult", "0050"): [],
+        ("TaiwanStockCapitalReductionReferencePrice", "0050"): [],
+        ("TaiwanStockSplitPrice", "0050"): [],
     }
+
+
+def etf_rows() -> list[dict]:
+    scale = {"open": 0.1, "max": 0.1, "min": 0.1, "close": 0.1}
+    return [
+        r | {"stock_id": "0050"} | {k: round(r[k] * v, 2) for k, v in scale.items()}
+        for r in data("finmind_price_2330_recent.json")
+    ]
 
 
 def yahoo_like(code: str, routes: dict, bump: dict[date, float] | None = None):
@@ -312,6 +325,13 @@ def test_health_report_records_failures_and_keeps_checking(make) -> None:
     assert not result["prices.cross_source"].passed
     assert "2026-10-14" in result["prices.cross_source"].detail
     assert result["revenue.sanity"].passed  # later checks still ran
+
+
+def test_etf_prices_skip_the_listing_check(make) -> None:
+    md, _ = make(overrides=[TSMC_LISTING])
+    etf = md.etf_prices("0050", AS_OF)
+    assert etf.adjusted["date"].max() == AS_OF
+    assert etf.raw["close"].iloc[-1] == pytest.approx(244.0)
 
 
 def test_price_history_override_moves_the_start(make) -> None:

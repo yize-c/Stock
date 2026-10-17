@@ -14,6 +14,7 @@ from datetime import date
 from stock_research.analysis.fundamentals import summarize, ttm_table
 from stock_research.analysis.inputs import StockData, load_stock_data
 from stock_research.analysis.results import InsufficientHistory
+from stock_research.analysis.returns import ReturnComparison, compare_returns
 from stock_research.analysis.revenue import summarize_yoy
 from stock_research.analysis.risk import RiskMetrics, Sharpe, risk_metrics, sharpe_ratio
 from stock_research.analysis.stability_inputs import StabilityReport, stability_report
@@ -79,6 +80,7 @@ class Analysis:
     stability: StabilityReport
     risk: dict[WindowName, RiskMetrics | InsufficientHistory]
     sharpe: dict[WindowName, Sharpe | str]
+    returns: dict[WindowName, ReturnComparison | InsufficientHistory]
     fundamentals: dict[str, dict[WindowName, Stat]]
     revenue_yoy: dict[WindowName, Stat]
     technicals: Technicals | None
@@ -103,6 +105,24 @@ def _risk(data: StockData, analysis_config: AppConfig, stability: StabilityRepor
         else:
             sharpe[name] = metrics.reason
     return risk, sharpe
+
+
+def _returns(
+    market_data: MarketData, data: StockData, config: AppConfig, stability: StabilityReport
+) -> dict[WindowName, ReturnComparison | InsufficientHistory]:
+    """Stock net of costs vs the total-return index, 0050 and the risk-free rate."""
+    code = config.markets.tw.benchmark.compare_etf
+    etf, problem = None, None
+    try:
+        etf = market_data.etf_prices(code, data.as_of).adjusted
+    except DataValidationError as exc:
+        problem = f"{code} 資料無法取得：{exc}"
+    return {
+        name: compare_returns(
+            data.prices.adjusted, data.benchmark, etf, problem, stability.windows[name], config
+        )
+        for name in MAIN_WINDOWS
+    }
 
 
 def _fundamentals(data: StockData, config: AppConfig, stability: StabilityReport):
@@ -178,6 +198,7 @@ def run_analysis(
     data = load_stock_data(market_data, code, as_of, with_peers=with_peers, progress=progress)
     stability = stability_report(data, config)
     risk, sharpe = _risk(data, config, stability)
+    returns = _returns(market_data, data, config, stability)
     fundamentals, yoy = _fundamentals(data, config, stability)
     llm = None
     if with_llm:
@@ -190,6 +211,7 @@ def run_analysis(
         stability=stability,
         risk=risk,
         sharpe=sharpe,
+        returns=returns,
         fundamentals=fundamentals,
         revenue_yoy=yoy,
         technicals=technicals(data.prices.adjusted, config.technicals),

@@ -174,3 +174,10 @@ def test_cli_analyze_reports_blocked_stock(config, monkeypatch, tmp_path) -> Non
         app, ["analyze", "2330", "--no-peers", "--config", str(tmp_path / "config.yaml")]
     )
     assert result.exit_code == 1 and "未通過" in result.output
+
+
+def test_report_compares_returns_with_index_0050_and_deposits(analysis, config) -> None:
+    text = render_analysis(analysis, config)
+    assert "報酬比較" in text and "0050（還原，扣 ETF 來回成本）" in text
+    assert "扣一次來回成本，部位 NT$100,000" in text
+    assert "一年期定存（期間平均）" in text

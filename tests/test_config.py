@@ -157,6 +157,15 @@ def test_overlapping_risk_free_periods_raise(raw_config, write_config) -> None:
         load_config(write_config(raw_config))
 
 
+def test_shipped_risk_free_rates_have_no_gaps() -> None:
+    """The CBC deposit rates cover every day from the first price date (2003) on."""
+    rates = load_config(DEFAULT_CONFIG).markets.tw.risk_free.fallback_rates
+    assert rates[0].start == date(2003, 1, 1)
+    for previous, current in zip(rates, rates[1:], strict=False):
+        assert (current.start - previous.end).days == 1, current.start
+    assert all(0.0 < r.rate < 0.05 for r in rates)  # decimals, not percent
+
+
 def test_fixed_split_requires_date(raw_config, write_config) -> None:
     raw_config["stability"]["internal_split"]["mode"] = "fixed"
     with pytest.raises(ConfigError, match="requires fixed_date"):

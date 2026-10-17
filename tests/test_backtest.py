@@ -153,3 +153,14 @@ def test_cli_backtest(monkeypatch, tmp_path, raw_config, write_config) -> None:
     result = runner.invoke(app, ["backtest", "--config", path])
     assert result.exit_code == 0, result.output
     assert bt.BUY in result.output and (tmp_path / "bt" / "score_backtest.json").exists()
+
+
+def test_v1_composite_ignores_statements_published_after_the_base_date() -> None:
+    """Spec v2 P0-3: filing deadlines hold in the backtest. Statements due after the base
+    date (e.g. Q2 2024, due 2024-08-14, for a 2024-06-30 base) must not change the score."""
+    base = date(2024, 6, 30)
+    full = replace(LATER, as_of=base)
+    visible = pd.to_datetime(LATER.quarterly["available_date"]) <= pd.Timestamp(base)
+    trimmed = replace(full, quarterly=LATER.quarterly.loc[visible])
+    assert (~visible).any()  # the synthetic data does contain later statements
+    assert bt.v1_composite(full, CONFIG) == bt.v1_composite(trimmed, CONFIG)

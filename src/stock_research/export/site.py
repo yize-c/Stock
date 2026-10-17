@@ -42,6 +42,8 @@ from stock_research.report.analysis import (
     OUTCOME_LABEL,
     VERDICT_LABEL,
     _metric_name,
+    comparison_rows,
+    cost_note,
     metric_value,
     num,
     pct,
@@ -84,7 +86,7 @@ def _health(report: HealthReport) -> dict[str, Any]:
     }
 
 
-def _risk(a: Analysis) -> dict[str, Any]:
+def _risk(a: Analysis, config: AppConfig) -> dict[str, Any]:
     out: dict[str, Any] = {}
     for window in COMPARE_ORDER:
         m = a.risk[window]
@@ -108,6 +110,7 @@ def _risk(a: Analysis) -> dict[str, Any]:
                 ["Sharpe", f"{sharpe.value:.2f}" if not isinstance(sharpe, str) else "無法計算"],
             ],
             "sharpe_note": sharpe if isinstance(sharpe, str) else None,
+            "comparison": comparison_rows(a.returns[window], cost_note(config)),
         }
     return out
 
@@ -222,7 +225,7 @@ def stock_payload(
             "metrics": _metrics(a),
             "fundamentals": _fundamentals(a),
             "frameworks": _frameworks(a),
-            "risk": _risk(a),
+            "risk": _risk(a, config),
             "technicals": {
                 "note": DISPUTED,
                 "descriptions": list(a.technicals.descriptions) if a.technicals else [],
