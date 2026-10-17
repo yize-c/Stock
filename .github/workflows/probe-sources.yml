@@ -9,6 +9,7 @@ on:
   push:
     paths:
       - scripts/probe_sources.py
+      - scripts/probe_tables.py
       - .github/workflows/probe-sources.yml
 
 permissions:
@@ -40,6 +41,15 @@ jobs:
             echo | openssl s_client -connect "$host:443" -servername "$host" 2>/dev/null \
               | openssl x509 -noout -subject -issuer -ext authorityInfoAccess || true
           done
+      # DGBAS hosts omit the TWCA intermediate certificate; add the one their certificate's
+      # Authority Information Access names, so verification succeeds with checking still on.
+      - name: Tables (central-bank rates, CPI)
+        run: |
+          pip install --quiet certifi xlrd
+          curl -sSf -o twca.crt http://sslserver.twca.com.tw/cacert/Cyber_SSL_2023.crt
+          openssl x509 -inform DER -in twca.crt -out twca.pem 2>/dev/null || cp twca.crt twca.pem
+          cat "$(python -m certifi)" twca.pem > bundle.pem
+          SSL_CERT_FILE="$PWD/bundle.pem" python scripts/probe_tables.py probe
       - uses: actions/upload-artifact@v4
         with:
           name: probe-responses
