@@ -142,6 +142,14 @@ watchlist stock at today's date and writes `site/data/index.json` and
 are listed with the failed checks, never with older data, and the app flags a dataset older
 than `app.stale_after_hours`.
 
+The app is dark only and shows little at first: the list has code and name, the score for
+the chosen capital tier (each tier's score is precomputed by the export; the page only
+switches), three dots for the revenue / profitability / risk verdicts, and a star; a stock's
+page opens with the score, the three aspects, the overall verdict and up to three main
+changes, with everything else in collapsed sections. Phones get one column and stacked tables,
+tablets a two-column list, and desktops (1024 px and up) a fixed list on the left with the
+stock on the right. The stale-data warning, failed checks and errors are always shown in full.
+
 ```bash
 uv run stock-research export --out site       # all watchlist stocks (about 10 FinMind requests each)
 uv run stock-research export 2330 2603 --out site

@@ -1,7 +1,7 @@
 // Network first for everything, so a new deploy (app or data) shows up on the next open.
 // Offline, the last copy is served; the app shows the data's date and flags it as stale,
 // so old data is never presented as current.
-const CACHE = "stock-v1";
+const CACHE = "stock-v2";
 const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icon-192.png"];
 
 self.addEventListener("install", (event) => {

@@ -284,6 +284,7 @@ def research_payload(
             {
                 "capital": t.capital,
                 "holdings": t.holdings,
+                "capital_label": capital_label(t.capital, t.holdings),
                 "score": t.final,
                 "label": t.label,
                 "label_note": t.label_note,
@@ -440,7 +441,7 @@ def export_site(
                 "overall": payload["overall"],
                 "aspects": payload["aspects"],
                 "composite_v1": payload["composite"]["V1"],
-                "score": _default_tier(payload["research_score"]),
+                "score": _list_score(payload["research_score"]),
             }
         )
     _write(
@@ -451,6 +452,11 @@ def export_site(
                 "as_of": as_of,
                 "generated_at": market_data.now,
                 "stale_after_hours": config.app.stale_after_hours,
+                "default_capital": config.research_score.default_capital,
+                "capital_tiers": [
+                    {"capital": t.capital, "label": capital_label(t.capital, t.holdings)}
+                    for t in config.research_score.capital_tiers
+                ],
                 "stocks": rows,
                 "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER, ATTRIBUTION],
             }
@@ -459,12 +465,22 @@ def export_site(
     return summary
 
 
-def _default_tier(research: dict[str, Any]) -> dict[str, Any]:
-    """The list shows the default capital tier's score and label, or why there is none."""
+def capital_label(capital: int, holdings: int) -> str:
+    """'30 萬・5 檔': the capital tier as the site shows it (formatted here, not in JS)."""
+    return f"{capital / 10000:g} 萬・{holdings} 檔"
+
+
+def _list_score(research: dict[str, Any]) -> dict[str, Any]:
+    """Every tier's score and label for the list (the page switches tiers), or why there is
+    none."""
     if not research.get("available"):
         return {"available": False, "reason": research.get("reason")}
-    tier = next(t for t in research["tiers"] if t["capital"] == research["default_capital"])
-    return {"available": True, "value": tier["score"], "label": tier["label"]}
+    return {
+        "available": True,
+        "tiers": {
+            str(t["capital"]): {"value": t["score"], "label": t["label"]} for t in research["tiers"]
+        },
+    }
 
 
 def _name(market_data: MarketData, code: str) -> str:
