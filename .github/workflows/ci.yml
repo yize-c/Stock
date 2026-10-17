@@ -24,3 +24,14 @@ jobs:
         run: uv run ruff format --check .
       - name: Tests
         run: uv run pytest --cov=stock_research --cov-report=term-missing
+
+  web:
+    # web/portfolio.js unit tests with Node's built-in runner (no packages to install).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Portfolio calculations
+        run: node --test tests/js/portfolio.test.js

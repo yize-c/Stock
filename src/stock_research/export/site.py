@@ -494,13 +494,19 @@ def capital_label(capital: int, holdings: int) -> str:
 
 def _list_score(research: dict[str, Any]) -> dict[str, Any]:
     """Every tier's score and label for the list (the page switches tiers), or why there is
-    none."""
+    none. The cap reason lets the capital page leave out stocks capped for doing worse than
+    the comparison ETF."""
     if not research.get("available"):
         return {"available": False, "reason": research.get("reason")}
     return {
         "available": True,
         "tiers": {
-            str(t["capital"]): {"value": t["score"], "label": t["label"]} for t in research["tiers"]
+            str(t["capital"]): {
+                "value": t["score"],
+                "label": t["label"],
+                "cap_reason": t["cap_reason"],
+            }
+            for t in research["tiers"]
         },
     }
 

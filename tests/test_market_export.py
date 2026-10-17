@@ -213,3 +213,9 @@ def test_export_extends_the_published_history(raw_config, write_config, tmp_path
         p.decode("utf-8", "replace") for k, p in published.items() if k.endswith(".json")
     )
     assert "trades" not in text and "cash_flows" not in text
+
+
+def test_js_test_parameters_are_the_exported_ones() -> None:
+    """tests/js/params.json (the web unit tests' input) must equal what the export writes."""
+    fixture = Path(__file__).parent / "js" / "params.json"
+    assert json.loads(fixture.read_text("utf-8")) == market.params_payload(CONFIG)

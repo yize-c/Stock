@@ -263,4 +263,8 @@ def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) 
     assert row["score"]["available"] and set(row["score"]["tiers"]) == {
         "50000", "300000", "1000000", "3000000",
     }  # fmt: skip
-    assert row["score"]["tiers"]["300000"] == {"value": default["score"], "label": default["label"]}
+    assert row["score"]["tiers"]["300000"] == {
+        "value": default["score"],
+        "label": default["label"],
+        "cap_reason": default["cap_reason"],
+    }
