@@ -32,16 +32,21 @@ def show_rates(out: Path) -> None:
     body = fetch(RATES)
     (out / "a13rate.xlsx").write_bytes(body)
     book = openpyxl.load_workbook(io.BytesIO(body), read_only=True, data_only=True)
+    print("=== sheets:", [s.title for s in book.worksheets])
     for sheet in book.worksheets:
         rows = list(sheet.iter_rows(values_only=True))
-        print(f"=== sheet {sheet.title!r}: {len(rows)} rows")
-        # Header and the last rows only: enough to find the columns and the date format.
-        for i in [*range(min(10, len(rows))), *range(max(10, len(rows) - 5), len(rows))]:
-            cells = ["" if v is None else str(v) for v in rows[i]]
-            while cells and cells[-1] == "":
-                cells.pop()
-            if cells:
-                print(i, "|".join(cells))
+        title = str(rows[0][0]) if rows and rows[0] else ""
+        if "平均" not in sheet.title and "平均" not in title:
+            continue
+        print(f"=== sheet {sheet.title!r}: {len(rows)} rows; title {title!r}")
+        for i in range(min(5, len(rows))):
+            print(i, "|".join("" if v is None else str(v) for v in rows[i]))
+        # Year-month (ROC) and the one-year time deposit, fixed and floating (columns 13, 14),
+        # from ROC year 92 (2003) on.
+        for row in rows[5:]:
+            month = "" if row[0] is None else str(row[0]).strip()
+            if month[:3].isdigit() and int(month[:3]) >= 92:
+                print(month, row[13], row[14], sep="|")
 
 
 def show_cpi(out: Path) -> None:
