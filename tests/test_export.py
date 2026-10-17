@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date
 
 import pytest
@@ -101,7 +102,8 @@ def test_cli_export(config, tmp_path, monkeypatch, write_config, raw_config) -> 
     raw_config["markets"]["tw"]["listing"]["overrides"] = [TSMC_LISTING]
     raw_config["app"]["watchlist"] = ["2330"]
     path = str(write_config(raw_config))
-    result = runner.invoke(app, ["export", "--out", str(tmp_path / "out"), "--config", path])
+    out = str(tmp_path / "out")
+    result = runner.invoke(app, ["export", "--out", out, "--no-market", "--config", path])
     assert result.exit_code == 0, result.output
     assert "1 ok" in result.output
 
@@ -109,7 +111,8 @@ def test_cli_export(config, tmp_path, monkeypatch, write_config, raw_config) -> 
         raise ValueError("boom")
 
     monkeypatch.setattr(site, "run_analysis", broken)
-    result = runner.invoke(app, ["export", "--out", str(tmp_path / "out2"), "--config", path])
+    out2 = str(tmp_path / "out2")
+    result = runner.invoke(app, ["export", "--out", out2, "--no-market", "--config", path])
     assert result.exit_code == 1 and "nothing should be published" in result.output
 
 
@@ -168,7 +171,10 @@ def test_web_app_is_dark_only_and_cache_is_versioned() -> None:
     assert 'content="black-translucent"' in html
     manifest = json.loads((web / "manifest.webmanifest").read_text(encoding="utf-8"))
     assert manifest["background_color"] == manifest["theme_color"] == "#0a0a0b"
-    assert 'const CACHE = "stock-v2";' in (web / "sw.js").read_text(encoding="utf-8")
+    sw = (web / "sw.js").read_text(encoding="utf-8")
+    assert 'const CACHE = "stock-v3";' in sw  # bumped with the holdings scripts
+    for script in re.findall(r'<script src="([^"]+)"', html):
+        assert f'"{script}"' in sw  # every script is in the offline shell
     css = (web / "style.css").read_text(encoding="utf-8")
     assert "prefers-reduced-motion" in css and "--bg: #0a0a0b" in css
     assert "prefers-color-scheme" not in css  # one theme only
@@ -261,4 +267,8 @@ def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) 
     assert row["score"]["available"] and set(row["score"]["tiers"]) == {
         "50000", "300000", "1000000", "3000000",
     }  # fmt: skip
-    assert row["score"]["tiers"]["300000"] == {"value": default["score"], "label": default["label"]}
+    assert row["score"]["tiers"]["300000"] == {
+        "value": default["score"],
+        "label": default["label"],
+        "cap_reason": default["cap_reason"],
+    }

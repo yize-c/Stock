@@ -1,0 +1,65 @@
+{
+  "costs": {
+    "fee_rate": 0.001425,
+    "default_fee_discount": 1.0,
+    "min_fee": 20.0,
+    "tax_stock": 0.003,
+    "tax_etf": 0.001,
+    "board_lot": 1000
+  },
+  "etf_code_prefixes": [
+    "00"
+  ],
+  "capital_tiers": [
+    {
+      "capital": 50000,
+      "holdings": 3
+    },
+    {
+      "capital": 300000,
+      "holdings": 5
+    },
+    {
+      "capital": 1000000,
+      "holdings": 10
+    },
+    {
+      "capital": 3000000,
+      "holdings": 15
+    }
+  ],
+  "labels": [
+    {
+      "min_score": 75.0,
+      "name": "強"
+    },
+    {
+      "min_score": 60.0,
+      "name": "中"
+    },
+    {
+      "min_score": 45.0,
+      "name": "觀察"
+    },
+    {
+      "min_score": 0.0,
+      "name": "弱"
+    }
+  ],
+  "alerts": {
+    "score_drop": 15.0,
+    "score_floor": 45.0,
+    "concentration": 0.25
+  },
+  "allocation": {
+    "min_score": 60.0,
+    "excluded_cap_reason": "0050 的歷史表現較好",
+    "max_weight": 0.25,
+    "cash_reserve": 0.05,
+    "fallback_etf": "0050",
+    "cost_ratio_warning": 0.008
+  },
+  "backup_reminder_days": 30,
+  "compare_etf": "0050",
+  "note": "損益為稅前，未扣股利所得稅與二代健保補充保費。"
+}

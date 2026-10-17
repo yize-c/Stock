@@ -63,9 +63,9 @@ class TpexFetcher:
         self._client = client
         self._max_age = max_age
 
-    def _get(self, endpoint: str) -> list[dict[str, Any]]:
+    def _get(self, endpoint: str, *, allow_empty: bool = False) -> list[dict[str, Any]]:
         result = self._client.get_json(f"{BASE_URL}/{endpoint}", max_age=self._max_age)
-        if not isinstance(result.data, list) or not result.data:
+        if not isinstance(result.data, list) or not (result.data or allow_empty):
             raise MissingDataError(None, f"{SOURCE}:{endpoint}", result.data, "a non-empty list")
         return result.data
 
@@ -96,6 +96,7 @@ class TpexFetcher:
             {
                 "date": [parse_roc_date(r["Date"]) for r in rows],
                 "code": [r["SecuritiesCompanyCode"].strip() for r in rows],
+                "name": [str(r.get("CompanyName", "")).strip() for r in rows],
                 "open": [parse_number(r["Open"], "open") for r in rows],
                 "high": [parse_number(r["High"], "high") for r in rows],
                 "low": [parse_number(r["Low"], "low") for r in rows],
@@ -113,8 +114,8 @@ class TpexFetcher:
         return frame
 
     def ex_rights_today(self) -> pd.DataFrame:
-        """Ex-rights / ex-dividend reference prices for the current trading day."""
-        rows = self._get("tpex_exright_daily")
+        """Ex-rights / ex-dividend reference prices for the current trading day (often none)."""
+        rows = self._get("tpex_exright_daily", allow_empty=True)
         return pd.DataFrame(
             {
                 "date": [parse_roc_date(r["Date"]) for r in rows],
@@ -128,6 +129,11 @@ class TpexFetcher:
                 "cash_dividend": [parse_number(r["CashDividend"], "cash_dividend") for r in rows],
                 "stock_dividend": [
                     parse_number(r["StockDividend"], "stock_dividend") for r in rows
+                ],
+                # Shares received per 1,000 shares held.
+                "stock_per_thousand": [
+                    parse_number(r.get("StockDivdendThousandShares", "0"), "stock_per_thousand")
+                    for r in rows
                 ],
                 "kind": [r["ExRightsDiviend"].strip() for r in rows],
                 "source": SOURCE,

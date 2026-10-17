@@ -1,0 +1,28 @@
+name: Probe active ETF holdings sources
+
+# Looks for free public daily-holdings sources of the domestic active ETFs and the issuers'
+# terms of use, from a GitHub runner (the development environment cannot reach these hosts).
+# Read-only GET requests without credentials; only public pages.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/probe_active_etf.py
+      - .github/workflows/probe-active-etf.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Active ETF sources
+        run: |
+          pip install --quiet certifi
+          SSL_CERT_FILE="$(python -m certifi)" python scripts/probe_active_etf.py
