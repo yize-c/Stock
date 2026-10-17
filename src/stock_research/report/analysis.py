@@ -207,7 +207,31 @@ def _growth_risk(a: Analysis) -> list[str]:
         for item in r.items
     ]
     lines += table(["項目", "危險程度（0-100）", "計算期間與說明"], rows) + [""]
+    lines += _checklist(a.growth_risk.checklist)
     return lines
+
+
+def _checklist_value(metric) -> str:
+    if metric.current is None:
+        return "—"
+    if metric.unit == "amount":
+        return f"{metric.current / 1e8:,.1f} 億元"
+    if metric.unit == "days":
+        return f"{metric.current:.0f} 天"
+    return pct(metric.current, 1)
+
+
+def _checklist(c) -> list[str]:
+    lines = [f"#### 風險檢查清單（{c.note}）", ""]
+    rows = []
+    for risk in c.risks:
+        if not risk.metrics:
+            rows.append([risk.name, "—（財報無法量化）", "—", "—", risk.qualitative])
+        for metric in risk.metrics:
+            trend = metric.direction + ("（風險升高的方向）" if metric.worsening else "")
+            rows.append([risk.name, metric.name, _checklist_value(metric), trend, risk.qualitative])
+    headers = ["風險", "量化指標", "目前值", f"近 {c.years} 年方向", "質化資訊（文件）"]
+    return lines + table(headers, rows) + [""]
 
 
 @dataclass(frozen=True)

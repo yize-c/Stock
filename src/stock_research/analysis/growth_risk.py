@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from stock_research.analysis.growth import GrowthScore, growth_score
 from stock_research.analysis.inputs import StockData
 from stock_research.analysis.research_score import ValuationPosition, valuation_position
+from stock_research.analysis.risk_checklist import RiskChecklist, risk_checklist
 from stock_research.analysis.risk_rating import RiskRating, risk_rating
 from stock_research.analysis.stability_inputs import StabilityReport
 from stock_research.config import AppConfig, QuadrantConfig
@@ -35,6 +36,7 @@ class GrowthRisk:
     growth: GrowthScore
     risk: RiskRating
     quadrant: Quadrant | None  # None when either score is missing
+    checklist: RiskChecklist  # information only, never scored
 
 
 def quadrant(growth: float | None, risk: float | None, settings: QuadrantConfig) -> Quadrant | None:
@@ -75,4 +77,9 @@ def assess(
         config.risk.annualization_days,
         config.risk_rating,
     )
-    return GrowthRisk(growth, risk, quadrant(growth.score, risk.score, config.quadrant))
+    return GrowthRisk(
+        growth,
+        risk,
+        quadrant(growth.score, risk.score, config.quadrant),
+        risk_checklist(data, config.risk_checklist),
+    )

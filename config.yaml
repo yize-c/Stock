@@ -747,3 +747,11 @@ quadrant:
   growth_mid: 33
   risk_high: 50
   preferred: mid_low  # 中成長・低風險, the senior investor's preference
+
+risk_checklist:
+  # 成長 × 風險 §1.2.1: the user's five TSMC risks turned into numbers where statements allow
+  # (information only, never scored); the rest comes from documents the user provides.
+  lookback_years: 3
+  min_points: 4
+  flat_points: 0.01  # ratios: a change under 1 percentage point over the window is flat
+  flat_relative: 0.05  # amounts and days: a change under 5% of the mean level is flat

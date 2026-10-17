@@ -1011,6 +1011,17 @@ class RiskRatingConfig(_Model):
     stability: StabilityDangerConfig
 
 
+class RiskChecklistConfig(_Model):
+    """Risk checklist (成長 × 風險 §1.2.1): information only, never scored. Each metric shows
+    its latest value and its direction over ``lookback_years``; a change smaller than the
+    tolerance is "持平"."""
+
+    lookback_years: PositiveInt
+    min_points: Annotated[int, Field(ge=2)]  # values needed for a direction
+    flat_points: PositiveFloat  # ratios: change below this (0.01 = 1 point) is flat
+    flat_relative: PositiveFloat  # amounts and days: change below this share is flat
+
+
 class QuadrantConfig(_Model):
     """Growth x risk quadrants (成長 × 風險 §1.3)."""
 
@@ -1072,6 +1083,7 @@ class AppConfig(_Model):
     growth: GrowthConfig
     risk_rating: RiskRatingConfig
     quadrant: QuadrantConfig
+    risk_checklist: RiskChecklistConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:
