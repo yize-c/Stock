@@ -58,10 +58,6 @@ function chip(code, label) {
 function pct(value) {
   return value === null || value === undefined ? "N/A" : `${Math.round(value * 100)}%`;
 }
-function price(close) {
-  if (!close || close.value === null) return "";
-  return close.value.toLocaleString("zh-TW", { maximumFractionDigits: 2 });
-}
 function table(headers, rows) {
   const head = headers.map((h) => `<th>${esc(h)}</th>`).join("");
   const body = rows
@@ -133,7 +129,7 @@ function rowHTML(stock) {
   }
   return `<li><a class="row" href="#/s/${esc(stock.code)}">
     <div class="main"><div class="name">${esc(stock.code)} ${esc(stock.name)}</div>
-    <div class="sub">${esc(stock.industry)}・收盤 ${price(stock.close)}</div>
+    <div class="sub">${esc(stock.industry)}</div>
     <div class="minis">${aspectMini(stock)}</div></div>
     <div class="right"><div class="small muted">V1 分數</div><div class="big-score">${pct(stock.composite_v1)}</div>${stock.reference_label ? `<div class="small muted">回測：${esc(stock.reference_label)}</div>` : ""}</div>
     </a>${star}</li>`;
@@ -270,7 +266,6 @@ function renderDetail(s) {
     <section class="card">
       <div class="small muted">${esc(s.market)}・${esc(s.industry)}・資料日期 ${esc(s.as_of)}</div>
       <div class="big">${esc(s.code)} ${esc(s.name)}</div>
-      <div>收盤 ${price(s.close)} <span class="small muted">（${esc(s.close.date)}，${esc(s.close.note)}）</span></div>
       <p>整體判定 ${chip(s.overall.code)}</p>
       <div class="aspects">${aspects}</div>
       ${drivers}

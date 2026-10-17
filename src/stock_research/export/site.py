@@ -49,7 +49,7 @@ from stock_research.report.analysis import (
     pct,
     render_analysis,
 )
-from stock_research.report.health import CHECK_NAMES, DISCLAIMER
+from stock_research.report.health import ATTRIBUTION, CHECK_NAMES, DISCLAIMER
 from stock_research.validation.aspects import aspect_verdicts
 
 SCHEMA_VERSION = 1
@@ -198,8 +198,6 @@ def stock_payload(
     a: Analysis, config: AppConfig, backtest: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     st = a.stability
-    raw = a.data.prices.raw.dropna(subset=["close"])
-    last = raw.iloc[-1]
     names = {m.spec.key: _metric_name(m) for m in st.metrics}
     aspects = aspect_verdicts(st.metrics, config.validation)
     return _clean(
@@ -211,11 +209,6 @@ def stock_payload(
             "market": a.info.ticker.market.value,
             "industry": a.data.industry,
             "as_of": a.as_of,
-            "close": {
-                "value": float(last["close"]),
-                "date": last["date"],
-                "note": "原始收盤價（未還原）",
-            },
             "overall": _verdict(st.overall.verdict),
             "drivers": [names[k] for k in st.overall.drivers],
             "aspects": {k: {"name": ASPECT_NAMES[k], **_verdict(aspects[k])} for k in ASPECT_NAMES},
@@ -235,7 +228,7 @@ def stock_payload(
                 st.composites[WindowName.POST_2020].score, backtest, config
             ),
             "report_markdown": render_analysis(a, config),
-            "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER],
+            "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER, ATTRIBUTION],
         }
     )
 
@@ -286,7 +279,7 @@ def export_site(
                 "as_of": as_of,
                 "problem": row["problem"],
                 "health": _health(exc.report),
-                "disclaimer": [DISCLAIMER],
+                "disclaimer": [DISCLAIMER, ATTRIBUTION],
             }
             row["name"] = _name(market_data, code)
             payload["name"] = row["name"]
@@ -300,7 +293,12 @@ def export_site(
             _write(
                 out_dir / "data" / "stocks" / f"{code}.json",
                 _clean(
-                    {"schema": SCHEMA_VERSION, "as_of": as_of, **row, "disclaimer": [DISCLAIMER]}
+                    {
+                        "schema": SCHEMA_VERSION,
+                        "as_of": as_of,
+                        **row,
+                        "disclaimer": [DISCLAIMER, ATTRIBUTION],
+                    }
                 ),
             )
             rows.append(row)
@@ -314,7 +312,6 @@ def export_site(
                 "status": "ok",
                 "name": payload["name"],
                 "industry": payload["industry"],
-                "close": payload["close"],
                 "overall": payload["overall"],
                 "aspects": payload["aspects"],
                 "composite_v1": payload["composite"]["V1"],
@@ -330,7 +327,7 @@ def export_site(
                 "generated_at": market_data.now,
                 "stale_after_hours": config.app.stale_after_hours,
                 "stocks": rows,
-                "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER],
+                "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER, ATTRIBUTION],
             }
         ),
     )

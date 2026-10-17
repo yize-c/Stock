@@ -5,6 +5,12 @@ from __future__ import annotations
 from stock_research.data.validation import HealthReport
 
 DISCLAIMER = "本工具僅供研究，不構成投資建議。"
+# FinMind's terms require attribution and forbid redistributing its raw data, so the
+# published site shows only values computed from it (no closes, amounts or raw records).
+ATTRIBUTION = (
+    "資料來源：FinMind（台股股價、財報、月營收）、中央銀行（一年期定存利率）。"
+    "這裡只呈現程式計算的結果，不轉載原始資料。"
+)
 
 CHECK_NAMES = {
     "calendar": "交易日曆",
