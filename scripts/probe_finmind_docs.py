@@ -20,6 +20,16 @@ INDEXES = (
 )
 KEYWORDS = re.compile(r"ETF|Holding|Weight|成分|成份|持股|權重|主動", re.IGNORECASE)
 MAX_LINES = 1500
+SECTIONS = (
+    "TaiwanStockInfo",
+    "TaiwanStockActiveETFInfo",
+    "TaiwanStockActiveETFHolding",
+    "TaiwanStockActiveETFHoldingChange",
+    "TaiwanStockMarketValueWeight",
+    "TaiwanStockMarketValue",
+    "TaiwanStockPrice",
+    "TaiwanStockDividend",
+)
 
 
 def fetch(url: str) -> tuple[int, str]:
@@ -43,13 +53,22 @@ def main() -> int:
             print(text[:300])
             continue
         if url.endswith("llms-full.txt"):
-            # Long: only the lines that mention ETFs, holdings or weights, with context.
+            # Long: the full sections of the datasets that may hold ETF data, plus the
+            # headings of every section so nothing ETF-related is missed.
+            for line in lines:
+                if line.startswith("#"):
+                    print("HEADING " + line)
             for i, line in enumerate(lines):
-                if KEYWORDS.search(line):
-                    print(f"{i}: " + " | ".join(lines[max(0, i - 2) : i + 3])[:600])
+                if line.startswith("### ") and any(f"### {n} " in line + " " for n in SECTIONS):
+                    after = range(i + 1, len(lines))
+                    end = next((j for j in after if lines[j].startswith("#")), i + 40)
+                    print("\n".join(lines[i:end]))
+            continue
+        if url != INDEXES[0]:
             continue
         for line in lines[:MAX_LINES]:
-            print(line)
+            if KEYWORDS.search(line) or "Free" in line or "Tier" in line:
+                print(line)
         pages += [u for u in re.findall(r"\((https?://[^)\s]+)\)", text) if KEYWORDS.search(u)]
     for url in dict.fromkeys(pages):
         status, text = fetch(url)
