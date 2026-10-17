@@ -155,6 +155,22 @@ def test_web_app_files_exist() -> None:
     assert "data/index.json" in (web / "app.js").read_text(encoding="utf-8")
 
 
+def test_web_app_is_dark_only_and_cache_is_versioned() -> None:
+    """Spec v2 §5.2: dark colours everywhere, a new cache name, reduced motion respected."""
+    from tests.conftest import REPO_ROOT
+
+    web = REPO_ROOT / "web"
+    html = (web / "index.html").read_text(encoding="utf-8")
+    assert '<meta name="theme-color" content="#0a0a0b">' in html
+    assert 'content="black-translucent"' in html
+    manifest = json.loads((web / "manifest.webmanifest").read_text(encoding="utf-8"))
+    assert manifest["background_color"] == manifest["theme_color"] == "#0a0a0b"
+    assert 'const CACHE = "stock-v2";' in (web / "sw.js").read_text(encoding="utf-8")
+    css = (web / "style.css").read_text(encoding="utf-8")
+    assert "prefers-reduced-motion" in css and "--bg: #0a0a0b" in css
+    assert "prefers-color-scheme" not in css  # one theme only
+
+
 def _calibration(passed: bool) -> dict:
     tiers = [50000, 300000, 1000000, 3000000]
     stats = {
@@ -231,6 +247,15 @@ def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) 
     assert all(0 <= t["score"] <= 100 and t["label"] for t in research["tiers"])
     assert {p["name"] for p in research["parts"]} >= {"投資大師原則", "籌碼"}
     assert "不構成投資建議" in research["disclaimer"]
-    row = _read(tmp_path / "c" / "data" / "index.json")["stocks"][0]
+    index = _read(tmp_path / "c" / "data" / "index.json")
+    assert index["default_capital"] == 300000
+    assert [t["label"] for t in index["capital_tiers"]] == [
+        "5 萬・3 檔", "30 萬・5 檔", "100 萬・10 檔", "300 萬・15 檔",
+    ]  # fmt: skip
+    row = index["stocks"][0]
     default = next(t for t in research["tiers"] if t["capital"] == 300000)
-    assert row["score"] == {"available": True, "value": default["score"], "label": default["label"]}
+    assert default["capital_label"] == "30 萬・5 檔"
+    assert row["score"]["available"] and set(row["score"]["tiers"]) == {
+        "50000", "300000", "1000000", "3000000",
+    }  # fmt: skip
+    assert row["score"]["tiers"]["300000"] == {"value": default["score"], "label": default["label"]}
