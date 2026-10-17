@@ -1,0 +1,28 @@
+name: Probe official open data
+
+# TWSE/TPEx open data (daily closes, ex-rights, licence) and uniform active-ETF holdings
+# sources, read from a GitHub runner (the development environment cannot reach these hosts).
+# Read-only GET requests without credentials; only public pages.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/probe_open_data.py
+      - .github/workflows/probe-open-data.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Official open data
+        run: |
+          pip install --quiet certifi
+          SSL_CERT_FILE="$(python -m certifi)" python scripts/probe_open_data.py
