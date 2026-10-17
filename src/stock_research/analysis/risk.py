@@ -14,21 +14,21 @@ anything in the future; ``HISTORICAL_LABEL`` is the wording reports put next to 
 * VaR = the loss at the (1 - confidence) quantile of daily returns, reported as a positive
   fraction (linear interpolation between observations).
 * Sharpe is separate (``sharpe_ratio``): it needs a risk-free rate for every day of the range
-  and raises if ``markets.tw.risk_free.fallback_rates`` does not cover it.
+  (the latest month may be reused for ``carry_forward_max_days``) and raises otherwise.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date
 
 import numpy as np
 import pandas as pd
 
 from stock_research.analysis.results import InsufficientHistory
 from stock_research.analysis.weighting import decay_weights
-from stock_research.config import AppConfig, MajorEvent, RiskFreeRate
-from stock_research.data.errors import MissingDataError
+from stock_research.config import AppConfig, MajorEvent
+from stock_research.data.risk_free import RiskFreeRates, average_risk_free  # noqa: F401
 from stock_research.data.windows import TimeWindow
 
 HISTORICAL_LABEL = "歷史統計值，計算期間 {start} 至 {end}，不代表未來機率"
@@ -155,38 +155,18 @@ class Sharpe:
     source: str
 
 
-def average_risk_free(rates: list[RiskFreeRate], start: date, end: date) -> float:
-    """Calendar-day-weighted mean rate over ``[start, end]``; any uncovered day raises."""
-    total, covered, uncovered = 0.0, 0, []
-    day = start
-    while day <= end:
-        rate = next((r.rate for r in rates if r.start <= day <= r.end), None)
-        if rate is None:
-            uncovered.append(day)
-        else:
-            total += rate
-            covered += 1
-        day += timedelta(days=1)
-    if uncovered:
-        raise MissingDataError(
-            None,
-            "risk_free_rate",
-            f"no rate for {uncovered[0]}..{uncovered[-1]} ({len(uncovered)} day(s))",
-            "markets.tw.risk_free.fallback_rates covering the whole range",
-        )
-    return total / covered
-
-
-def sharpe_ratio(metrics: RiskMetrics, config: AppConfig) -> Sharpe:
+def sharpe_ratio(
+    metrics: RiskMetrics, config: AppConfig, risk_free: RiskFreeRates | None = None
+) -> Sharpe:
     """(annualized return - average risk-free rate) / volatility over the metrics' range.
 
-    The central bank series cannot be fetched from this environment, so the rates come from
-    the config's per-period values; the source is reported with the result.
+    The rates are the central bank's (``RiskFreeRates``; the config's when none are given);
+    the source is reported with the result.
     """
-    rates = config.markets.tw.risk_free.fallback_rates
-    rate = average_risk_free(rates, metrics.start, metrics.end)
+    rates = risk_free or RiskFreeRates.from_config(config)
+    rate, source = rates.average(metrics.start, metrics.end)
     return Sharpe(
         value=(metrics.annualized_return - rate) / metrics.volatility,
         risk_free_rate=rate,
-        source="config markets.tw.risk_free.fallback_rates",
+        source=source,
     )

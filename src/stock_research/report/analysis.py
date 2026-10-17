@@ -26,7 +26,7 @@ from stock_research.data.windows import MAIN_WINDOWS, WindowName
 from stock_research.llm.analysis import TaskStatus
 from stock_research.llm.verification import VerifiedClaim
 from stock_research.markets.tickers import to_yfinance_symbol
-from stock_research.report.health import DISCLAIMER, render_health_report
+from stock_research.report.health import ATTRIBUTION, DISCLAIMER, render_health_report
 
 WINDOW_LABEL = {
     WindowName.POST_2020: "V1（2020 後）",
@@ -410,7 +410,7 @@ def _risk(a: Analysis, shown: tuple[WindowName, ...], config: AppConfig) -> list
         recovered = dd.recovered or "尚未回到前高"
         sharpe = a.sharpe[w]
         sharpe_text = (
-            f"{sharpe.value:.2f}（無風險利率 {pct(sharpe.risk_free_rate)}，來源：config 分期設定值）"
+            f"{sharpe.value:.2f}（無風險利率 {pct(sharpe.risk_free_rate)}，來源：{sharpe.source}）"
             if not isinstance(sharpe, str)
             else f"無法計算：{sharpe}"
         )
@@ -443,7 +443,10 @@ def comparison_rows(c, cost_note: str) -> list[list[str]]:
     if not isinstance(c, ReturnComparison):
         return [["報酬比較", f"資料不足：{c.reason}"]]
     etf = pct(c.etf) if c.etf is not None else f"無法取得（{c.etf_problem}）"
-    rf = pct(c.risk_free) if c.risk_free is not None else f"無法取得（{c.risk_free_problem}）"
+    if c.risk_free is not None:
+        rf = pct(c.risk_free) + (f"（{c.risk_free_source}）" if c.risk_free_source else "")
+    else:
+        rf = f"無法取得（{c.risk_free_problem}）"
     rows = [
         ["期間", f"{c.start} 至 {c.end}（{c.years:.1f} 年）"],
         ["個股年化報酬（未扣成本）", pct(c.stock_gross)],
@@ -584,7 +587,7 @@ def render_analysis(
     lines += _links(a, config)
     lines += _sources(a)
     lines += _appendix(a)
-    lines += ["## 12. 免責聲明", "", DISCLAIMER, SCORE_DISCLAIMER, ""]
+    lines += ["## 12. 免責聲明", "", ATTRIBUTION, DISCLAIMER, SCORE_DISCLAIMER, ""]
     return "\n".join(lines)
 
 

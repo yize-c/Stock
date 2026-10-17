@@ -115,10 +115,15 @@
 - 衝突處理選 **A**：允許依歷史回測的參考分數；本金調整由匯出程式預先算好各級距，JS 只切換顯示、不計算。
 - 校準股票池：全市場上市櫃普通股（含 FinMind `TaiwanStockDelisting` 已下市股），用 GitHub Actions 分批抓並快取；資料齊全前分數不上線。
 - 先前的「歷史回測參考」併入 v2 第四節（扣成本、十分位、樣本外、與 0050 比較；標示改為強／中／觀察／弱）。
-- 無風險利率：一年期定存固定利率的央行五大銀行月平均（`a13rate`；2008-10 前成員含彰銀、之後為土銀），由 GitHub 探測讀取後寫入 `markets.tw.risk_free.fallback_rates`（2003-01 ~ 2026-09，45 期）。每月需延長；`as_of` 超過最後一期時 V1 的 Sharpe 與超額報酬照規則報錯為不可用。
+- 無風險利率：一年期定存固定利率的央行五大銀行月平均（`a13rate`；2008-10 前成員含彰銀、之後為土銀），config 存 2003-01 ~ 2026-09（45 期）。程式每次執行讀央行檔（`data/fetchers/cbc.py`，標準函式庫解析 xlsx），與 config 重疊處必須一致、之後的月份接上；讀不到（開發環境）就用 config 並註明。最新一期最多沿用 62 天（`carry_forward_max_days`，輸出會註明），超過或中間缺月就報錯（使用者決定）。
 - 交易成本：`costs`（手續費 0.1425% 雙邊、最低 20 元、證交稅股票 0.3%／ETF 0.1% 賣出），`analysis/costs.py`；報酬比較一律扣一次來回成本（參考部位 `costs.reference_position`）。
 - 0050：`markets.tw.benchmark.compare_etf`，還原並扣 ETF 來回成本，與加權報酬指數、一年期定存並列（`analysis/returns.py`）。
 - push：探測腳本（`scripts/probe_*.py` 與探測流程）可直接 push 到工作分支；其他 push 先問使用者。
+- token（使用者決定）：雲端容器沒有 `.env`，本機用雲端環境設定的環境變數、GitHub Actions 用 Secret；不印出、不寫進檔案或 commit。全市場校準用使用者另外申請的第二個免費 token（GitHub Secret）。
+- 公開網站（使用者決定，FinMind 條款：不可轉發原始資料、需標註 FinMind）：只放程式計算的結果（不放收盤價、金額等原始數字），網頁與報告附資料來源標註（`report/health.py` 的 `ATTRIBUTION`）。
+- 跨來源比對（walk-forward 69 次失敗的原因，使用者要求調查）：(1) 過去的 `as_of` 比對時，Yahoo 收盤已用今天以前的全部分割回溯調整 → 讀到今天並用 Yahoo 的分割倍數還原；(2) Yahoo 個別日期錯誤（多在 2024-03-29）→ 經證交所STOCK_DAY／櫃買 tradingStock 官方收盤確認後列入 `markets.tw.data_validation.known_source_errors`，該日不比對且 FinMind 必須等於官方收盤；清單外仍報錯。修正後 69 次全部通過。
+- 分數 B 項「walk-forward 正向」（使用者選 b）：以指標層級計算——該指標的 walk-forward AUC 高於隨機基準時，該指標的 V1／V3 一致才算數；目前只有開發期資料，需註明為樣本內結果。
+- ETF 資料來源（使用者：不用錢、不違法即可）：FinMind 主動式 ETF 持股需 Sponsor 付費、沒有指數型 ETF 成分股；元大官網 0050 持股頁公開列出股數與權重（使用條款未找到）；統一投信（00981A）條款禁止未經同意轉載；證交所 e添富需書面同意（開放資料平臺除外）。持股原始資料不可放上公開網站。
 
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |

@@ -383,6 +383,70 @@ def test_cross_source_skips_every_day_before_a_yahoo_split(make) -> None:
     assert result["prices.cross_source"].passed, result["prices.cross_source"].detail
 
 
+def test_cross_source_undoes_yahoo_splits_after_a_past_as_of(make) -> None:
+    """Yahoo's closes are adjusted for stock dividends up to today. Checked as of an earlier
+    date, the dividend after as_of must be undone, not reported as a source mismatch
+    (2881 and 9917 in the 2024 walk-forward)."""
+    routes = base_routes()
+    split_day = date(2026, 10, 5)
+    plain = yahoo_like("2330", routes)
+
+    def adjusted(symbol, start, end_exclusive):
+        frame = plain(symbol, start, end_exclusive)
+        before = frame.index.date < split_day
+        frame.loc[before, "Close"] = frame.loc[before, "Close"] / 1.05
+        frame.loc[frame.index.date == split_day, "Stock Splits"] = 1.05
+        return frame
+
+    md, _ = make(routes, overrides=[TSMC_LISTING], yahoo=adjusted)
+    result = {c.name: c for c in md.health_report("2330", date(2026, 9, 30)).checks}
+    assert result["prices.cross_source"].passed, result["prices.cross_source"].detail
+    # A real disagreement inside the window still fails.
+    md, _ = make(
+        routes,
+        overrides=[TSMC_LISTING],
+        yahoo=yahoo_like("2330", routes, bump={date(2026, 9, 29): 1.02}),
+    )
+    result = {c.name: c for c in md.health_report("2330", date(2026, 9, 30)).checks}
+    assert not result["prices.cross_source"].passed
+    assert "2026-09-29" in result["prices.cross_source"].detail
+
+
+def test_known_yahoo_error_is_skipped_only_while_finmind_matches_official(make) -> None:
+    """A Yahoo close confirmed wrong against the official data is left out of the comparison
+    (2412 on 2024-03-29); if FinMind no longer equals the official close, it fails."""
+    routes = base_routes()
+    day = date(2026, 10, 14)
+    close = next(
+        r["close"] for r in data(routes[("TaiwanStockPrice", "2330")]) if r["date"] == "2026-10-14"
+    )
+    yahoo = yahoo_like("2330", routes, bump={day: 1.02})
+
+    def tweak(official):
+        def apply(raw):
+            raw["markets"]["tw"]["data_validation"]["known_source_errors"] = [
+                {
+                    "source": "yahoo",
+                    "ticker": "2330",
+                    "date": day.isoformat(),
+                    "official_close": official,
+                    "evidence": "TWSE STOCK_DAY (test)",
+                }
+            ]
+
+        return apply
+
+    md, _ = make(routes, overrides=[TSMC_LISTING], yahoo=yahoo, tweak=tweak(close))
+    report = md.health_report("2330", AS_OF)
+    result = {c.name: c for c in report.checks}
+    assert result["prices.cross_source"].passed, result["prices.cross_source"].detail
+    assert any("Yahoo 收盤價有誤" in line for line in report.limitations)
+    md, _ = make(routes, overrides=[TSMC_LISTING], yahoo=yahoo, tweak=tweak(close * 1.1))
+    result = {c.name: c for c in md.health_report("2330", AS_OF).checks}
+    assert not result["prices.cross_source"].passed
+    assert "official close" in result["prices.cross_source"].detail
+
+
 def test_health_report_stale_data(make) -> None:
     routes = base_routes()
     routes[("TaiwanStockPrice", "2330")] = data("finmind_price_2330_recent.json")[:-1]

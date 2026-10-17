@@ -95,12 +95,11 @@ def _risk(data: StockData, analysis_config: AppConfig, stability: StabilityRepor
         risk[name] = metrics
         if isinstance(metrics, RiskMetrics):
             try:
-                sharpe[name] = sharpe_ratio(metrics, analysis_config)
+                sharpe[name] = sharpe_ratio(metrics, analysis_config, data.risk_free)
             except DataValidationError as exc:
                 sharpe[name] = (
-                    f"config 的無風險利率（markets.tw.risk_free.fallback_rates）未涵蓋 "
-                    f"{metrics.start} 至 {metrics.end}（{exc.actual}）；"
-                    "需填入中央銀行一年期定存利率"
+                    f"一年期定存利率未涵蓋 {metrics.start} 至 {metrics.end}（{exc.actual}）；"
+                    "央行月資料需更新（markets.tw.risk_free）"
                 )
         else:
             sharpe[name] = metrics.reason
@@ -119,7 +118,13 @@ def _returns(
         problem = f"{code} 資料無法取得：{exc}"
     return {
         name: compare_returns(
-            data.prices.adjusted, data.benchmark, etf, problem, stability.windows[name], config
+            data.prices.adjusted,
+            data.benchmark,
+            etf,
+            problem,
+            stability.windows[name],
+            config,
+            data.risk_free,
         )
         for name in MAIN_WINDOWS
     }

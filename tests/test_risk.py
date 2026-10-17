@@ -9,6 +9,7 @@ import pytest
 from stock_research.analysis.results import InsufficientHistory
 from stock_research.analysis.risk import (
     HISTORICAL_LABEL,
+    RiskFreeRates,
     average_risk_free,
     daily_returns,
     max_drawdown,
@@ -115,14 +116,14 @@ def test_sharpe_uses_configured_rates(raw_config, write_config) -> None:
     assert sharpe.value == pytest.approx(
         (m.annualized_return - sharpe.risk_free_rate) / m.volatility
     )
-    assert "fallback_rates" in sharpe.source
+    assert "config 分期設定值" in sharpe.source
 
 
 def test_sharpe_without_rates_fails_loudly(raw_config, write_config) -> None:
     cfg = config(raw_config, write_config)
     adjusted, bench = frames(np.array([]), beta=1.0)
     m = risk_metrics(adjusted, bench, build_window(WindowName.POST_2020, cfg, AS_OF), cfg)
-    with pytest.raises(MissingDataError, match="fallback_rates"):
+    with pytest.raises(MissingDataError, match="markets.tw.risk_free"):
         sharpe_ratio(m, cfg)
 
 
@@ -131,3 +132,21 @@ def test_partial_rate_coverage_raises() -> None:
     assert average_risk_free(rates, date(2020, 1, 2), date(2020, 1, 3)) == 0.01
     with pytest.raises(MissingDataError, match="2020-01-11..2020-01-12"):
         average_risk_free(rates, date(2020, 1, 5), date(2020, 1, 12))
+
+
+def test_latest_rate_is_reused_only_for_a_limited_time() -> None:
+    """The CBC publishes each month late: the latest rate may cover up to N days after it,
+    and the source says so; beyond that, or inside a gap between periods, it raises."""
+    rates = (
+        RiskFreeRate(start=date(2026, 7, 1), end=date(2026, 7, 31), rate=0.016),
+        RiskFreeRate(start=date(2026, 9, 1), end=date(2026, 9, 30), rate=0.017),
+    )
+    risk_free = RiskFreeRates(rates, "test", carry_forward_max_days=62)
+    rate, note = risk_free.average(date(2026, 9, 1), date(2026, 10, 17))
+    assert rate == pytest.approx(0.017)
+    assert "沿用最近一期利率 17 天" in note
+    with pytest.raises(MissingDataError, match="2026-12-02"):
+        risk_free.average(date(2026, 9, 1), date(2026, 12, 2))
+    with pytest.raises(MissingDataError, match="2026-08-01..2026-08-31"):
+        risk_free.average(date(2026, 7, 1), date(2026, 9, 30))  # a gap is never filled
+    assert risk_free.average(date(2026, 9, 1), date(2026, 9, 30))[1] == "test"

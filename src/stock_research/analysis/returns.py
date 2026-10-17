@@ -13,9 +13,9 @@ import pandas as pd
 
 from stock_research.analysis.costs import net_return
 from stock_research.analysis.results import InsufficientHistory
-from stock_research.analysis.risk import average_risk_free
 from stock_research.config import AppConfig
 from stock_research.data.errors import DataValidationError
+from stock_research.data.risk_free import RiskFreeRates
 from stock_research.data.windows import TimeWindow
 
 _DAYS_PER_YEAR = 365.25
@@ -33,6 +33,7 @@ class ReturnComparison:
     etf_problem: str | None
     risk_free: float | None
     risk_free_problem: str | None
+    risk_free_source: str | None = None
 
     @property
     def excess_vs_index(self) -> float:
@@ -65,6 +66,7 @@ def compare_returns(
     etf_problem: str | None,
     window: TimeWindow,
     config: AppConfig,
+    risk_free: RiskFreeRates | None = None,
 ) -> ReturnComparison | InsufficientHistory:
     stock = _series(window.filter_prices(adjusted), "adj_close")
     index = _series(window.filter_prices(benchmark), "total_return_index")
@@ -86,9 +88,9 @@ def compare_returns(
             etf_problem = f"{config.markets.tw.benchmark.compare_etf} 在 {start}～{end} 缺資料"
         else:
             etf_value = _annualize(net_return(etf_total, position, True, config.costs), years)
-    rf, rf_problem = None, None
+    rf, rf_problem, rf_source = None, None, None
     try:
-        rf = average_risk_free(config.markets.tw.risk_free.fallback_rates, start, end)
+        rf, rf_source = (risk_free or RiskFreeRates.from_config(config)).average(start, end)
     except DataValidationError as exc:
         rf_problem = f"無風險利率未涵蓋 {start}～{end}（{exc.actual}）"
     return ReturnComparison(
@@ -102,4 +104,5 @@ def compare_returns(
         etf_problem=etf_problem,
         risk_free=rf,
         risk_free_problem=rf_problem,
+        risk_free_source=rf_source,
     )

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, time, timedelta
 from typing import TypeVar
 from zoneinfo import ZoneInfo
@@ -38,6 +38,7 @@ from stock_research.data.errors import (
     MissingDataError,
     SourceMismatchError,
 )
+from stock_research.data.fetchers.cbc import CbcFetcher
 from stock_research.data.fetchers.finmind import (
     EventKind,
     FinMindClient,
@@ -47,8 +48,9 @@ from stock_research.data.fetchers.finmind import (
 )
 from stock_research.data.fetchers.tpex import TpexFetcher
 from stock_research.data.fetchers.yahoo import YahooFetcher
-from stock_research.data.http import JsonClient, RateLimiter
+from stock_research.data.http import JsonClient, RateLimiter, SourceUnavailableError
 from stock_research.data.point_in_time import as_of_view
+from stock_research.data.risk_free import RiskFreeRates, extend_with_cbc
 from stock_research.data.shares import ShareBasis, check_share_count, share_basis, share_counts
 from stock_research.data.validation import (
     HealthReport,
@@ -148,6 +150,7 @@ class _Memo:
     info: pd.DataFrame | None = None
     raw: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = field(default_factory=dict)
     uncovered: dict[str, list[UncoveredCapitalChange]] = field(default_factory=dict)
+    risk_free: RiskFreeRates | None = None
 
 
 class MarketData:
@@ -159,6 +162,7 @@ class MarketData:
         tpex: TpexFetcher | None = None,
         *,
         peer_finmind: FinMindFetcher | None = None,
+        cbc: CbcFetcher | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._config = config
@@ -168,8 +172,36 @@ class MarketData:
         self._peer_finmind = peer_finmind or finmind
         self._yahoo = yahoo
         self._tpex = tpex
+        self._cbc = cbc
         self._clock = clock
         self._memo = _Memo()
+
+    def risk_free_rates(self) -> RiskFreeRates:
+        """One-year deposit rates: the config's, extended by the CBC file when it can be read.
+
+        An unreachable file (this development environment) leaves the config's rates, and the
+        source says so; a file that cannot be parsed or disagrees with the config raises.
+        """
+        if self._memo.risk_free is not None:
+            return self._memo.risk_free
+        rates = RiskFreeRates.from_config(self._config)
+        if self._cbc is not None:
+            try:
+                fetched = self._cbc.rates()
+            except SourceUnavailableError as exc:
+                rates = replace(rates, source=f"{rates.source}；央行檔本次無法讀取（{exc.actual}）")
+            else:
+                extended = extend_with_cbc(rates.rates, fetched)
+                rates = replace(
+                    rates,
+                    rates=tuple(extended),
+                    source=(
+                        "中央銀行五大銀行一年期定存月平均（a13rate，"
+                        f"{self.today()} 讀取，至 {extended[-1].end}）"
+                    ),
+                )
+        self._memo.risk_free = rates
+        return rates
 
     @property
     def now(self) -> datetime:
@@ -577,8 +609,41 @@ class MarketData:
     ) -> None:
         tol = self._tw.data_validation
         raw = prices.raw.loc[prices.raw["close"].notna()]
-        recent = list(raw["date"])[-tol.cross_source_lookback_trading_days :]
-        yahoo = self._yahoo.history(ticker, recent[0], recent[-1])
+        finmind = raw.set_index("date")["close"]
+        # Days where Yahoo is known to be wrong are skipped, but only while FinMind still
+        # matches the official close recorded for them.
+        known_wrong = []
+        for known in tol.known_source_errors:
+            if known.ticker != ticker.code or known.date not in finmind.index:
+                continue
+            close = float(finmind[known.date])
+            if abs(close / known.official_close - 1.0) > tol.cross_source_tolerance:
+                raise SourceMismatchError(
+                    ticker.code,
+                    f"finmind.close {known.date}",
+                    close,
+                    f"official close {known.official_close} ({known.evidence})",
+                )
+            known_wrong.append(known.date)
+            report.limitations.append(
+                f"{ticker.code}：{known.date} Yahoo 收盤價有誤（{known.evidence}），"
+                f"不做跨來源比對；FinMind 與官方收盤 {known.official_close:g} 一致。"
+            )
+        days = [d for d in raw["date"] if d not in known_wrong]
+        recent = days[-tol.cross_source_lookback_trading_days :]
+        # Yahoo serves closes adjusted for every split (and stock dividend) up to today. For a
+        # past as_of, read on to today and undo the splits after the window, so its closes are
+        # comparable with FinMind's raw ones. This only checks the data; nothing after as_of
+        # reaches the analysis.
+        history = self._yahoo.history(ticker, recent[0], max(recent[-1], self.today()))
+        in_window = [d <= recent[-1] for d in history["date"]]
+        yahoo = history.loc[in_window]
+        later = [
+            float(s)
+            for d, s in zip(history["date"], history["splits"], strict=True)
+            if d > recent[-1] and s not in (0, 1)
+        ]
+        yahoo = yahoo.assign(close=yahoo["close"] * np.prod(later))
         report.add_source(SourceStatus("yahoo", now, max(yahoo["date"])))
         changes = prices.basis_change_dates() + [
             d for d, s in zip(yahoo["date"], yahoo["splits"], strict=True) if s not in (0, 1)
@@ -586,8 +651,7 @@ class MarketData:
         cutoff = max([d for d in changes if d <= recent[-1]], default=None)
         # Every day before the last share-basis change, not only those in the window:
         # otherwise older (pre-change) days would refill the lookback.
-        excluded = [d for d in raw["date"] if cutoff is not None and d < cutoff]
-        finmind = raw.set_index("date")["close"]
+        excluded = known_wrong + [d for d in raw["date"] if cutoff is not None and d < cutoff]
         check_cross_source(
             ticker.code,
             {"finmind": finmind, "yahoo": yahoo.set_index("date")["close"]},
@@ -655,6 +719,12 @@ class MarketData:
                 FinMindClient(finmind_http, peer_age),
                 config.markets.tw.filing_deadlines,
                 snapshots=cache,
+            ),
+            cbc=CbcFetcher(
+                session,
+                config.markets.tw.risk_free.cbc,
+                cache,
+                timeout_seconds=sources.request_timeout_seconds,
             ),
         )
 

@@ -172,6 +172,20 @@ markets:
       # One-year time deposit rate, averaged over each window. Source: Central Bank of
       # the Republic of China (Taiwan) statistics.
       source: cbc_one_year_deposit
+      # The CBC file is read on every run where it is reachable (the GitHub runner; not this
+      # development environment). It must agree with fallback_rates where both have a rate;
+      # later months extend them.
+      cbc:
+        url: https://www.cbc.gov.tw/public/data/a13rate.xls
+        one_year_fixed_column: 13
+        start: 2003-01-01
+        members:
+          - { start: 2003-01-01, banks: [台銀, 合庫, 一銀, 華銀, 彰銀] }
+          - { start: 2008-11-01, banks: [台銀, 土銀, 合庫, 一銀, 華銀] }
+        cache_max_age_hours: 24
+      # The latest monthly rate may be reused for at most this many days after its month
+      # (the CBC publishes each month with a delay); the output says so. Beyond it: error.
+      carry_forward_max_days: 62
       # Per-period rates (this environment cannot reach the CBC site). Values: the CBC's
       # "五大銀行存放款利率歷史月資料" (https://www.cbc.gov.tw/public/data/a13rate.xls), the
       # monthly mean of the five largest banks' one-year fixed time-deposit rate (column
@@ -233,6 +247,30 @@ markets:
       min_halt_trading_days: 3
       # Raw-close cross-check between official, FinMind and yfinance.
       cross_source_tolerance: 0.005
+      # Yahoo closes found wrong against the official daily data (TWSE STOCK_DAY, TPEx
+      # tradingStock, read on a GitHub runner on 2026-10-17). These days are left out of the
+      # FinMind-vs-Yahoo comparison, and FinMind must equal official_close on them. Any other
+      # disagreement still fails.
+      known_source_errors:
+        - { source: yahoo, ticker: "2412", date: 2024-03-29, official_close: 126.0, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 127.0)" }
+        - { source: yahoo, ticker: "1216", date: 2024-03-29, official_close: 77.5, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 76.5)" }
+        - { source: yahoo, ticker: "2603", date: 2024-03-29, official_close: 172.0, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 175.0)" }
+        - { source: yahoo, ticker: "2382", date: 2024-03-29, official_close: 293.5, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 286.5)" }
+        - { source: yahoo, ticker: "6488", date: 2024-03-25, official_close: 582.0, evidence: "TPEx tradingStock 2024-03 (Yahoo 592.0)" }
+        - { source: yahoo, ticker: "6488", date: 2024-03-29, official_close: 580.0, evidence: "TPEx tradingStock 2024-03 (Yahoo 560.0)" }
+        - { source: yahoo, ticker: "9921", date: 2024-03-29, official_close: 217.5, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 220.5)" }
+        - { source: yahoo, ticker: "2317", date: 2024-03-29, official_close: 150.0, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 151.5)" }
+        - { source: yahoo, ticker: "2454", date: 2024-03-29, official_close: 1195.0, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 1185.0)" }
+        - { source: yahoo, ticker: "1101", date: 2024-03-29, official_close: 32.15, evidence: "TWSE STOCK_DAY 2024-03 (Yahoo 31.9)" }
+        - { source: yahoo, ticker: "5347", date: 2024-03-18, official_close: 84.8, evidence: "TPEx tradingStock 2024-03 (Yahoo 83.9)" }
+        - { source: yahoo, ticker: "5347", date: 2024-03-20, official_close: 89.7, evidence: "TPEx tradingStock 2024-03 (Yahoo 90.8, the 03-19 close)" }
+        - { source: yahoo, ticker: "5347", date: 2024-03-25, official_close: 86.3, evidence: "TPEx tradingStock 2024-03 (Yahoo 87.9, the 03-22 close)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-23, official_close: 108.0, evidence: "TPEx tradingStock 2024-09 (Yahoo 106.644, scaled before the 2024-10-01 rights issue)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-24, official_close: 107.0, evidence: "TPEx tradingStock 2024-09 (Yahoo 105.656, scaled before the 2024-10-01 rights issue)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-25, official_close: 106.5, evidence: "TPEx tradingStock 2024-09 (Yahoo 105.163, scaled before the 2024-10-01 rights issue)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-26, official_close: 105.0, evidence: "TPEx tradingStock 2024-09 (Yahoo 103.682, scaled before the 2024-10-01 rights issue)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-27, official_close: 103.0, evidence: "TPEx tradingStock 2024-09 (Yahoo 101.707, scaled before the 2024-10-01 rights issue)" }
+        - { source: yahoo, ticker: "5347", date: 2024-09-30, official_close: 103.5, evidence: "TPEx tradingStock 2024-09 (Yahoo 102.2, scaled before the 2024-10-01 rights issue)" }
       cross_source_lookback_trading_days: 60
       # |assets - (liabilities + equity)| / assets above this triggers a warning.
       balance_sheet_tolerance: 0.01
