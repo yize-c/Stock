@@ -161,6 +161,17 @@ test("cash with deposits, withdrawals, buys, sells and dividends; over-withdrawa
   assert.ok(P.validateCashFlows([withdraw("2026-10-18", 1)], s, c)[0].includes("今天"));
 });
 
+test("an edit or deletion that breaks later records is reported", () => {
+  const s = averaging();
+  assert.deepEqual(P.ledgerErrors(s, ctx()), []);
+  const noFirstBuy = { ...s, trades: s.trades.slice(1) }; // the sale of 500 still fits in 1000
+  assert.deepEqual(P.ledgerErrors(noFirstBuy, ctx()), []);
+  const noBuys = { ...s, trades: s.trades.slice(2) };
+  assert.ok(P.ledgerErrors(noBuys, ctx())[0].includes("2026-09-04"));
+  const noDeposit = { ...s, cash_flows: [withdraw("2026-09-05", 1)] };
+  assert.ok(P.ledgerErrors(noDeposit, ctx())[0].includes("2026-09-05"));
+});
+
 // --- returns ------------------------------------------------------------------------------------
 
 // 100 → 80 → 121: buying more at 80 helps the money-weighted return, not the time-weighted one
@@ -277,7 +288,13 @@ test("the alert log keeps each reason once per data date", () => {
 
 // --- capital suggestions ----------------------------------------------------------------------------
 
-const candidate = (code, score, price, cap_reason = null) => ({ code, name: code, score, price, cap_reason, reasons: ["華倫：ROE"] });
+const TIERS = [50000, 300000, 1000000, 3000000];
+const candidate = (code, score, price, cap_reason = null) => ({
+  code,
+  name: code,
+  price,
+  tiers: Object.fromEntries(TIERS.map((c) => [String(c), { value: score, label: "中", cap_reason }])),
+});
 const fallbackCloses = { closes: { "0050": ["元大台灣50", 100] } };
 
 test("allocation: lots plus odd shares, odd lots only when a lot does not fit, cash left exact", () => {
@@ -351,11 +368,43 @@ test("allocation with current holdings buys only the gap and never sells", () =>
   close(plan.cashLeft, 90000 - plan.spent);
 });
 
+test("allocation scores each candidate at the tier of the amount", () => {
+  const c = candidate("1101", 70, 50);
+  c.tiers["50000"] = { value: 55, label: "觀察", cap_reason: null }; // a small amount scores lower
+  assert.equal(P.allocate(50000, [c], ctx(fallbackCloses)).items.length, 0);
+  assert.equal(P.allocate(300000, [c], ctx(fallbackCloses)).items[0].score, 70);
+  const capped = candidate("1101", 90, 50, "0050 的歷史表現較好");
+  assert.equal(P.allocate(300000, [capped], ctx(fallbackCloses)).items.length, 0);
+});
+
+test("candidates come from analysed watchlist rows with a close", () => {
+  const stocks = [
+    { code: "2330", name: "台積電", status: "ok", score: { available: true, tiers: { 300000: { value: 80 } } } },
+    { code: "2317", name: "鴻海", status: "ok", score: { available: false, reason: "x" } },
+    { code: "9917", name: "中保科", status: "blocked" },
+    { code: "1101", name: "台泥", status: "ok", score: { available: true, tiers: {} } }, // no close
+  ];
+  const out = P.candidatesFrom(stocks, { 2330: ["台積電", 1000], 2317: ["鴻海", 200] });
+  assert.deepEqual(out, [{ code: "2330", name: "台積電", price: 1000, tiers: { 300000: { value: 80 } } }]);
+});
+
 test("the calculator works for any stock and amount", () => {
   const r = P.calculator(30000, 25, "2884", state(), params);
   assert.deepEqual([r.shares, r.lots, r.odd], [1197, 1, 197]); // 1198 would exceed by 5.6
   close(r.cashLeft, 30000 - 1197 * 25 - r.fee);
   assert.equal(P.calculator(10, 25, "2884", state(), params), null);
+});
+
+test("settings: discount as a fraction, stop-loss and take-profit in percent", () => {
+  const base = P.emptyState().settings;
+  const ok = P.settingsFromInput({ fee_discount: "0.6", stop_loss: "-15", take_profit: "30", up_color: "green" }, base);
+  assert.deepEqual(ok.errors, []);
+  assert.deepEqual(ok.settings, { fee_discount: 0.6, stop_loss: -0.15, take_profit: 0.3, up_color: "green" });
+  assert.deepEqual(P.settingsForInput(ok.settings), { fee_discount: "0.6", stop_loss: "-15", take_profit: "30", up_color: "green" });
+  const blank = P.settingsFromInput({ fee_discount: "", stop_loss: "", take_profit: "", up_color: "red" }, ok.settings);
+  assert.deepEqual(blank.settings, base);
+  const bad = P.settingsFromInput({ fee_discount: "6", stop_loss: "15", take_profit: "-1", up_color: "red" }, base);
+  assert.equal(bad.errors.length, 3);
 });
 
 // --- backup -------------------------------------------------------------------------------------------
@@ -381,4 +430,37 @@ test("CSV lists trades and cash flows and quotes cells that need it", () => {
   assert.equal(lines.length, 3);
   assert.equal(lines[1], "交易,2026-09-02,2330,買進,500,1000,500000,712,,");
   assert.equal(lines[2], '資金,2026-09-01,,入金,,,1000,,,"初始, ""本金"""');
+});
+
+// --- the holdings page --------------------------------------------------------------------------
+
+test("review: rows with alerts at the tier of the total, backup reminder, new cash", () => {
+  const first = buy("2330", "2026-09-01", 100, 1000, { fee: 0 });
+  first.snapshot = { as_of: "2026-08-31", status: "ok", tiers: { 300000: 90 }, aspects: {} };
+  const s = state([first, buy("0050", "2026-09-01", 100, 100, { fee: 0 })], [deposit("2026-09-01", 300000)]);
+  const data = {
+    params,
+    events: [],
+    closes: { 2330: ["台積電", 110], "0050": ["元大台灣50", 100] },
+    dataDate: "2026-10-16",
+    today: "2026-10-17",
+    scoresAsOf: "2026-10-16",
+    history: { 2330: [["2026-10-16", 110]], "0050": [["2026-08-31", 100], ["2026-10-16", 100]] },
+    scores: { 2330: [["2026-10-16", { status: "ok", tiers: { 300000: 70 }, aspects: {} }]] },
+  };
+  const r = P.review(s, data);
+  assert.equal(r.capital, 300000); // 300000 + 10000 gain
+  const tsmc = r.held.find((x) => x.code === "2330");
+  close(tsmc.share, 110000 / 120000);
+  assert.ok(tsmc.alerts.some((a) => a.reason.includes("90 → 70"))); // the saved snapshot
+  assert.ok(tsmc.alerts.some((a) => a.reason.includes("占總市值")));
+  assert.equal(r.held.find((x) => x.code === "0050").now, null); // no scores for it
+  assert.equal(r.backupDue, true);
+  assert.equal(r.newCash, null); // the deposit was used by the day's buys
+  const later = { ...s, cash_flows: [...s.cash_flows, deposit("2026-10-01", 50000)], last_backup: "2026-10-01" };
+  const again = P.review(later, data);
+  close(again.newCash, 300000 - 110000 + 50000);
+  assert.equal(again.backupDue, false);
+  assert.equal(P.backupDue({ ...later, last_backup: "2026-09-16" }, "2026-10-17", params), true); // 31 days
+  assert.equal(P.backupDue(state(), "2026-10-17", params), false); // nothing to back up
 });

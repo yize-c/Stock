@@ -105,6 +105,18 @@ const Portfolio = (() => {
     return errors;
   }
 
+  /** Whether the records still add up after an edit or deletion: no sale above the shares
+   *  held then, no withdrawal above the cash then. */
+  function ledgerErrors(state, ctx) {
+    const book = replay(state, ctx);
+    const errors = [];
+    if (book.oversold.length) errors.push(`賣出股數會超過當時的持股（${book.oversold.join("、")}）`);
+    if (book.uncoveredWithdrawals.length) {
+      errors.push(`出金金額會大於當時的現金餘額（${book.uncoveredWithdrawals.join("、")}）`);
+    }
+    return errors;
+  }
+
   // --- the ledger ----------------------------------------------------------------------------
 
   // Order within one day: deposits, ex-rights events (whoever held the shares before the
@@ -268,6 +280,7 @@ const Portfolio = (() => {
         close,
         quoted: close !== null,
         value: null,
+        sellCost: null,
         unrealized: null,
         returnPct: null,
         trades: p.trades,
@@ -276,6 +289,7 @@ const Portfolio = (() => {
         const value = close * p.shares;
         const sellCost = feeFor(value, discount, ctx.params) + taxFor(value, p.code, ctx.params);
         row.value = value;
+        row.sellCost = sellCost;
         row.unrealized = value - sellCost - p.cost;
         row.returnPct = p.cost > 0 ? row.unrealized / p.cost : null;
       }
@@ -535,6 +549,61 @@ const Portfolio = (() => {
       .map((x) => ({ date: dataDate, code, level: x.level, action: x.action, reason: x.reason }));
   }
 
+  function daysBetween(from, to) {
+    return Math.round((Date.parse(to) - Date.parse(from)) / 86400000);
+  }
+
+  /** True when there are records and no backup in the last ``backup_reminder_days`` days. */
+  function backupDue(state, today, params) {
+    if (!state.trades.length && !state.cash_flows.length) return false;
+    return !state.last_backup || daysBetween(state.last_backup, today) > params.backup_reminder_days;
+  }
+
+  /** Cash from a deposit not yet used by a later trade ("有新的可投入現金"), or null. */
+  function newCash(state, book) {
+    const latest = (items) => items.reduce((d, x) => (x.date > d ? x.date : d), "");
+    const deposit = latest(state.cash_flows.filter((f) => f.type === "deposit"));
+    if (!deposit || book.cash <= EPS) return null;
+    return deposit > latest(state.trades) ? book.cash : null; // same day: taken as used
+  }
+
+  /**
+   * Everything the holdings page shows. ``data``: {params, events, closes, dataDate, today,
+   * scoresAsOf, history: code → closes, scores: code → score history}. Scores are compared at
+   * the capital tier of the total assets; a holding's purchase snapshot is the one saved with
+   * its first buy, or the history's on that date.
+   */
+  function review(state, data) {
+    const ctx = {
+      params: data.params,
+      events: data.events,
+      closes: data.closes,
+      dataDate: data.dataDate,
+      today: data.today,
+    };
+    const s = summary(state, ctx, { history: data.history });
+    const capital = holdingsFor(Math.max(s.totalAssets, 0), data.params).capital;
+    const held = s.rows
+      .filter((r) => r.shares > 0)
+      .map((r) => {
+        const scores = data.scores[r.code];
+        const opened = r.opened;
+        const bought = !opened ? null : opened.snapshot !== undefined ? opened.snapshot : snapshotFor(scores, opened.date);
+        const now = scores ? snapshotFor(scores, data.scoresAsOf) : null;
+        const share = s.marketValue > EPS && r.value !== null ? r.value / s.marketValue : null;
+        const alerts = sellAlerts(r, bought, now, share, capital, state, data.params);
+        return { ...r, bought, now, share, alerts };
+      });
+    return {
+      ...s,
+      capital,
+      held,
+      closed: s.rows.filter((r) => r.shares === 0),
+      backupDue: backupDue(state, data.today, data.params),
+      newCash: newCash(state, s.book),
+    };
+  }
+
   function pct(x) {
     return `${(x * 100).toFixed(1)}%`;
   }
@@ -580,8 +649,17 @@ const Portfolio = (() => {
     };
   }
 
+  /** Candidates for the capital page: the watchlist's analysed stocks with every tier's
+   *  score (precomputed by the export) and the latest official close. */
+  function candidatesFrom(stocks, closes) {
+    return stocks
+      .filter((r) => r.status === "ok" && r.score && r.score.available && closes[r.code])
+      .map((r) => ({ code: r.code, name: r.name, price: closes[r.code][1], tiers: r.score.tiers }));
+  }
+
   /**
-   * Which stocks and how many shares for ``amount`` (version A). Candidates: score ≥
+   * Which stocks and how many shares for ``amount`` (version A). Candidates ({code, name,
+   * price, tiers}) are scored at the tier of the amount (holdings included): score ≥
    * min_score and not capped for doing worse than the comparison ETF, highest first; equal
    * weights, each at most max_weight; a cash reserve kept; the part no stock fills (too few
    * candidates, or the weight cap) goes to the fallback ETF with the reason. With
@@ -599,15 +677,16 @@ const Portfolio = (() => {
     const budget = amount - reserve;
     const investable = total - reserve;
     const picked = candidates
+      .map((c) => ({ ...c, tier: (c.tiers || {})[String(tier.capital)] || null }))
       .filter(
         (c) =>
           c.code !== rule.fallback_etf &&
-          c.score !== null &&
-          c.score >= rule.min_score &&
-          c.cap_reason !== rule.excluded_cap_reason &&
+          c.tier !== null &&
+          c.tier.value >= rule.min_score &&
+          c.tier.cap_reason !== rule.excluded_cap_reason &&
           c.price > 0
       )
-      .sort((a, b) => b.score - a.score)
+      .sort((a, b) => b.tier.value - a.tier.value)
       .slice(0, tier.holdings);
     const weight = Math.min(1 / tier.holdings, rule.max_weight);
     const target = investable * weight;
@@ -638,36 +717,52 @@ const Portfolio = (() => {
     const items = [];
     let spent = 0;
     picked.forEach((c, i) => {
-      const buy = needs[i] > 0 ? sharesFor(needs[i] * scale, c.price, discount, params) : null;
+      const allotted = needs[i] * scale;
+      const buy = allotted > 0 ? sharesFor(allotted, c.price, discount, params) : null;
       if (!buy) return;
       const ratio = (2 * buy.fee + taxFor(buy.amount, c.code, params)) / buy.amount;
       items.push({
         code: c.code,
         name: c.name,
-        score: c.score,
+        score: c.tier.value,
+        label: c.tier.label,
         price: c.price,
+        held: heldValue(c.code),
+        allotted,
         ...buy,
         costRatio: ratio,
         costWarning: ratio > rule.cost_ratio_warning ? "這筆金額太小，手續費占比偏高" : null,
-        reasons: c.reasons || [],
       });
       spent += buy.amount + buy.fee;
     });
     let fallback = null;
     const quote = ctx.closes[rule.fallback_etf];
     if (fallbackNeed > EPS && quote) {
-      const buy = sharesFor(Math.min(fallbackNeed * scale, budget - spent), quote[1], discount, params);
+      const allotted = Math.min(fallbackNeed * scale, budget - spent);
+      const buy = sharesFor(allotted, quote[1], discount, params);
       if (buy) {
         const why = [];
         if (missing > 0) {
           why.push(`分數 ≥ ${rule.min_score} 且未被標示「${rule.excluded_cap_reason}」的股票只有 ${picked.length} 檔，少 ${missing} 檔`);
         }
         if (capLeft > EPS) why.push(`單一個股上限 ${pct(rule.max_weight)}，其餘部分`);
-        fallback = { code: rule.fallback_etf, name: quote[0], price: quote[1], ...buy, reasons: why };
+        fallback = { code: rule.fallback_etf, name: quote[0], price: quote[1], allotted, ...buy, reasons: why };
         spent += buy.amount + buy.fee;
       }
     }
-    return { tier, target, items, fallback, reductions, spent, reserve, cashLeft: amount - spent };
+    return {
+      tier,
+      total,
+      reserve,
+      budget,
+      target,
+      scale,
+      items,
+      fallback,
+      reductions,
+      spent,
+      cashLeft: amount - spent,
+    };
   }
 
   /** Version-independent calculator: shares, fee and cost ratio for one stock and amount. */
@@ -676,6 +771,46 @@ const Portfolio = (() => {
     if (!buy) return null;
     const ratio = (2 * buy.fee + taxFor(buy.amount, code, params)) / buy.amount;
     return { ...buy, costRatio: ratio, cashLeft: amount - buy.amount - buy.fee };
+  }
+
+  // --- settings -------------------------------------------------------------------------------
+
+  /** The settings form's values: the fee discount as a fraction (0.6 = 六折), stop-loss and
+   *  take-profit in percent (-15, 30); blank clears a field. Returns {settings, errors}. */
+  function settingsFromInput(input, current) {
+    const errors = [];
+    const number = (text, label) => {
+      if (!given(text)) return null;
+      const value = Number(text);
+      if (!Number.isFinite(value)) errors.push(`${label}不是數字`);
+      return Number.isFinite(value) ? value : null;
+    };
+    const discount = number(input.fee_discount, "手續費折扣");
+    if (discount !== null && !(discount > 0 && discount <= 1)) errors.push("手續費折扣要在 0 到 1 之間（例：0.6 為六折）");
+    const stop = number(input.stop_loss, "停損");
+    if (stop !== null && !(stop < 0)) errors.push("停損要是負的百分比（例：-15）");
+    const take = number(input.take_profit, "停利");
+    if (take !== null && !(take > 0)) errors.push("停利要是正的百分比（例：30）");
+    const color = input.up_color === "green" ? "green" : "red";
+    const settings = {
+      ...current,
+      fee_discount: discount,
+      stop_loss: stop === null ? null : stop / 100,
+      take_profit: take === null ? null : take / 100,
+      up_color: color,
+    };
+    return { settings, errors };
+  }
+
+  /** The settings as the form shows them (percent for stop-loss / take-profit). */
+  function settingsForInput(settings) {
+    const percent = (x) => (given(x) ? String(Math.round(x * 10000) / 100) : "");
+    return {
+      fee_discount: given(settings.fee_discount) ? String(settings.fee_discount) : "",
+      stop_loss: percent(settings.stop_loss),
+      take_profit: percent(settings.take_profit),
+      up_color: settings.up_color === "green" ? "green" : "red",
+    };
   }
 
   // --- backup ----------------------------------------------------------------------------------
@@ -745,6 +880,7 @@ const Portfolio = (() => {
     validateTrade,
     tradeWarnings,
     validateCashFlows,
+    ledgerErrors,
     replay,
     closeOn,
     holdings,
@@ -758,11 +894,17 @@ const Portfolio = (() => {
     scoreAt,
     sellAlerts,
     newAlertLog,
+    backupDue,
+    newCash,
+    review,
+    candidatesFrom,
     holdingsFor,
     orderFees,
     sharesFor,
     allocate,
     calculator,
+    settingsFromInput,
+    settingsForInput,
     exportJSON,
     importJSON,
     toCSV,

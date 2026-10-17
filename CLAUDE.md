@@ -115,6 +115,7 @@
 - 股利稅（a）：損益算稅前，註明未扣股利所得稅與二代健保補充保費。
 - 匯出（`export/market.py`）：證交所 `STOCK_DAY_ALL` 與櫃買每日行情（全市場收盤價，兩邊必須同一天）、證交所除權息預告 `TWT48U_ALL` 與櫃買當日除權息、觀察清單每日分數與三面向、`params.json`（費率、稅率、級距、提醒與配置門檻，取自 config 的 `costs`、`research_score`、`portfolio`）。OpenAPI 只有最新一天，所以每次匯出先讀已發布網站（`portfolio.site_url`）的 `data/market/archive.json.gz` 再加上當天資料；網站從沒有過封存檔才從頭開始，曾有卻讀不到就讓匯出失敗（不可默默重來）。證交所條款：網站本身禁止爬蟲，但授權政府資料開放平臺（OpenAPI）的資料可用、轉載需註明來源。證交所除權息預告的無償配股率單位尚未用實例確認，股數不自動調整並標示；櫃買的「每千股配股數」÷1000。`--no-market` 供本機預覽。
 - `web/portfolio.js`（`node --test tests/js/portfolio.test.js`，CI 的 `web` job；`tests/js/params.json` 由 Python 測試確認與匯出的參數相同）：移動平均成本；同一天依序為入金、除權息、交易、出金（當天賣出可支應當天出金）；現金股利記在除息日；TWR 的入出金算在當天開始時（以前一日收盤估值），XIRR 用二分法；0050 對照以整股（可零股）、同樣手續費與 ETF 稅買賣；本金試算排除 0050 本身、整張與零股分兩筆委託各收手續費，含現有持股時錢不夠就各檔等比例縮小，只列出需要減碼的部位、不建議賣出。
+- 畫面（`web/holdings.js`，只排版、不計算；`web/portfolio.js` 的 `review()` 算好首屏所有數字）：分頁「市場／我的持股／本金試算」（手機底部、桌面左側）；紀錄存 localStorage（讀不到時不覆寫、提示匯入備份；儲存失敗提示立即匯出）；表單用底部抽屜；JSON 備份（主畫面 App 內用分享選單）、CSV（含 BOM 給 Excel）；提醒每個資料日期同一原因只記一次；分數比較用總資產對應的本金級距，買進時紀錄存在第一筆買進的 `snapshot`；本金試算的理由從 `data/stocks/<代號>.json` 的投資大師原則載入。驗收截圖（390／820／1280）用測試 fixture 產生的本機網站。
 - 主動式 ETF（b）：追蹤 FinMind `TaiwanStockActiveETFInfo` 中全部 `category: domestic` 的台股主動式 ETF（2026-10-17 共 23 檔）；00986A 為海外型排除，00992A 為台股型納入。
 
 ## 0–100 分數（v2 第四節，第 3 階段）

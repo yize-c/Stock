@@ -170,6 +170,13 @@ OpenAPIs only return the latest day, so each export reads the archive from the p
 the export fails rather than start over. Holdings themselves never leave the viewer's
 browser. `--no-market` skips this for local previews.
 
+The app has three tabs: 市場 (the watchlist), 我的持股 (holdings, P&L, sell reminders) and
+本金試算 (which stocks and how many shares for an amount). Trades, deposits and withdrawals
+are kept only in the browser's localStorage, with a JSON backup (export / import) and a CSV
+export; every number on those two tabs comes from `web/portfolio.js`
+(`node --test tests/js/portfolio.test.js`), which reads its rates and thresholds from
+`data/params.json`.
+
 Industry peers are skipped in the daily export (`app.with_peers: false`): fetching every peer's
 statements does not fit FinMind's free tier, so framework items that need industry medians
 show as unavailable.

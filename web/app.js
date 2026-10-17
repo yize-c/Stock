@@ -19,7 +19,8 @@ const LEGEND = [
 ];
 const CHEVRON = '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
-const state = { index: null, filter: "all", query: "", more: false, favs: loadSet("favs"), capital: null, listScroll: 0, current: null, detail: null };
+const TABS = { market: "台股穩定性", holdings: "我的持股", capital: "本金試算" };
+const state = { index: null, tab: null, filter: "all", query: "", more: false, favs: loadSet("favs"), capital: null, listScroll: 0, current: null, detail: null };
 const listView = document.getElementById("listView");
 const detailPane = document.getElementById("detailPane");
 const staleBox = document.getElementById("stale");
@@ -454,13 +455,27 @@ async function route() {
       const saved = Number(stored("capital"));
       const known = state.index.capital_tiers.some((t) => t.capital === saved);
       state.capital = known ? saved : state.index.default_capital;
-      renderList();
     } catch (error) {
       listView.innerHTML = `<div class="error">無法載入資料：${esc(error.message)}<br>請確認網路，或稍後再試（每日開市前更新）。</div>`;
       detailPane.innerHTML = "";
       return;
     }
   }
+  const tab = location.hash.startsWith("#/p") ? "holdings" : location.hash.startsWith("#/c") ? "capital" : "market";
+  const switched = tab !== state.tab;
+  state.tab = tab;
+  setTab(tab);
+  if (tab !== "market") {
+    const held = location.hash.match(/^#\/p\/([0-9A-Z]{4,7})$/);
+    state.current = held ? held[1] : null;
+    document.body.dataset.view = tab === "capital" ? "page" : held ? "detail" : "list";
+    document.title = `${TABS[tab]}・台股穩定性`;
+    if (switched || !wide.matches) window.scrollTo(0, 0);
+    if (tab === "capital") await Holdings.showCapital();
+    else await Holdings.showHoldings(state.current);
+    return;
+  }
+  if (switched) renderList();
   const match = location.hash.match(/^#\/s\/(\d{4,6})$/);
   const leaving = document.body.dataset.view === "list";
   if (match) {
@@ -477,6 +492,16 @@ async function route() {
     renderHint();
     if (!wide.matches) window.scrollTo(0, state.listScroll);
   }
+}
+
+// Tabs: 市場 / 我的持股 / 本金試算 (bottom bar on phones, a rail on the left on desktops).
+function setTab(tab) {
+  for (const link of document.querySelectorAll("#tabs a")) {
+    if (link.dataset.tab === tab) link.setAttribute("aria-current", "page");
+    else link.removeAttribute("aria-current");
+  }
+  document.getElementById("title").textContent = TABS[tab];
+  document.getElementById("headAction").innerHTML = tab === "holdings" ? Holdings.headAction() : "";
 }
 
 window.addEventListener("hashchange", route);

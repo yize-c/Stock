@@ -1,8 +1,10 @@
 // Network first for everything, so a new deploy (app or data) shows up on the next open.
 // Offline, the last copy is served; the app shows the data's date and flags it as stale,
 // so old data is never presented as current.
-const CACHE = "stock-v2";
-const SHELL = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest", "icon-192.png"];
+const CACHE = "stock-v3";
+const SHELL = [
+  "./", "index.html", "style.css", "portfolio.js", "holdings.js", "app.js", "manifest.webmanifest", "icon-192.png",
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

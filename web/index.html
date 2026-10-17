@@ -19,15 +19,24 @@
 <body data-view="list">
   <div id="stale" class="stale" role="alert" hidden></div>
   <div class="app">
-    <aside class="pane list-pane" id="listPane" aria-label="股票列表">
+    <nav class="tabs" id="tabs" aria-label="分頁">
+      <a href="#/" data-tab="market"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18 9 12l4 3 7-8"/></svg><span>市場</span></a>
+      <a href="#/p" data-tab="holdings"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="6.5" width="17" height="12" rx="2.5"/><path d="M15.5 12.5h2"/></svg><span>我的持股</span></a>
+      <a href="#/c" data-tab="capital"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5.5" y="3.5" width="13" height="17" rx="2.5"/><path d="M8.5 7.5h7M9 12h.01M12 12h.01M15 12h.01M9 15.5h.01M12 15.5h.01M15 15.5h.01"/></svg><span>本金試算</span></a>
+    </nav>
+    <aside class="pane list-pane" id="listPane" aria-label="列表">
       <header class="head">
-        <h1>台股穩定性</h1>
+        <h1 id="title">台股穩定性</h1>
         <span class="date" id="date"></span>
+        <span class="head-action" id="headAction"></span>
       </header>
       <div id="listView"><p class="muted pad">載入中…</p></div>
     </aside>
     <main class="pane detail-pane" id="detailPane" aria-live="polite"></main>
   </div>
+  <dialog class="sheet" id="sheet" aria-label="表單"></dialog>
+  <script src="portfolio.js"></script>
+  <script src="holdings.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
