@@ -1,0 +1,28 @@
+name: Probe ETF and closes sources
+
+# Reads official closes and public ETF holdings pages from a GitHub runner (the development
+# environment cannot reach them) and prints what they return. Read-only GET requests without
+# credentials; only public pages.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/probe_etf_sources.py
+      - .github/workflows/probe-etf.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: ETF and closes sources
+        run: |
+          pip install --quiet certifi
+          SSL_CERT_FILE="$(python -m certifi)" python scripts/probe_etf_sources.py
