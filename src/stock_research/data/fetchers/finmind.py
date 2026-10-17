@@ -566,6 +566,7 @@ class FinMindFetcher:
         self._client = client
         self._deadlines = deadlines
         self._snapshots = snapshots
+        self._snapshotted: set[tuple[str, str, int, str]] = set()
 
     def stock_info(self) -> pd.DataFrame:
         return normalize_stock_info(self._client.dataset("TaiwanStockInfo"))
@@ -643,6 +644,12 @@ class FinMindFetcher:
     def _snapshot(self, code: str, dataset: str, raw: pd.DataFrame, period_col: str) -> None:
         if self._snapshots is None:
             return
+        # The same response read again in one run (e.g. one load per base date) has nothing
+        # new to keep; the snapshots themselves are write-once.
+        key = (code, dataset, len(raw), str(raw[period_col].max()) if len(raw) else "")
+        if key in self._snapshotted:
+            return
+        self._snapshotted.add(key)
         body = raw.drop(columns=["source"])
         for period, group in body.groupby(period_col, sort=True):
             records = group.sort_values(list(group.columns)).to_dict("records")
