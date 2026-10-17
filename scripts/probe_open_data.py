@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 
 USER_AGENT = "Mozilla/5.0 (stock-research personal research tool; source probe)"
@@ -105,10 +106,35 @@ def uniform_holdings() -> None:
         lines(text, HOLDINGS, 20)
 
 
+def terms_text() -> None:
+    """Full text of TWSE's terms (reuse clauses) and the open-data platform's licence."""
+    status, _, text = fetch("https://www.twse.com.tw/zh/page/terms/use.html")
+    print(f"=== TWSE terms full text -> {status}")
+    body = " ".join(
+        re.sub(r"<[^>]+>", " ", re.sub(r"(?s)<(script|style).*?</\1>", "", text)).split()
+    )
+    for sentence in re.split(r"(?<=[。；])", body):
+        if re.search(r"轉載|重製|引用|散布|商業|授權|開放資料|資料", sentence):
+            print("  |", sentence.strip()[:300])
+    for query in ("每日收盤行情", "除權除息預告"):
+        url = "https://data.gov.tw/api/v2/rest/dataset?" + urllib.parse.urlencode({"q": query})
+        status, _, text = fetch(url)
+        print(f"=== data.gov.tw search {query} -> {status} {len(text)} chars")
+        print("  ", text[:1500])
+
+
+def mops_active_etf() -> None:
+    """Links and forms behind MOPS's ETF menu entries for domestic active ETFs."""
+    status, _, text = fetch("https://mopsov.twse.com.tw/mops/web/t78sb39_new")
+    print(f"=== MOPS ETF menu -> {status}")
+    for match in re.finditer(r"主動式|持股", text):
+        start = max(0, match.start() - 300)
+        print("  ...", " ".join(text[start : match.end() + 300].split())[:600])
+
+
 def main() -> None:
-    twse()
-    tpex()
-    uniform_holdings()
+    terms_text()
+    mops_active_etf()
 
 
 if __name__ == "__main__":
