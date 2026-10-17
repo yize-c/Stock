@@ -154,6 +154,15 @@ Industry peers are skipped in the daily export (`app.with_peers: false`): fetchi
 statements does not fit FinMind's free tier, so framework items that need industry medians
 show as unavailable.
 
+## Official sources (probe)
+
+The development environment cannot reach TWSE, MOPS, the central bank or DGBAS, but GitHub's
+runners can. `.github/workflows/probe-sources.yml` runs `scripts/probe_sources.py` (read-only
+GET requests, standard library) and prints status, content type and a preview of each
+response. So far it has verified the hand-set listing dates against TWSE's official
+`t187ap03_L` data and shown that TWSE's per-stock history starts in 2010 and its
+capital-reduction data in 2011.
+
 ## Validation
 
 Code in `src/stock_research/validation/`, records in `validation/`:
