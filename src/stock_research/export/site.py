@@ -34,6 +34,7 @@ from stock_research.data.errors import DataValidationError
 from stock_research.data.market_data import MarketData
 from stock_research.data.validation import HealthReport
 from stock_research.data.windows import WindowName
+from stock_research.export import market
 from stock_research.report.analysis import (
     COMPARE_ORDER,
     FLAG_LABEL,
@@ -378,9 +379,18 @@ def export_site(
     *,
     codes: list[str] | None = None,
     progress: Callable[[str], None] = lambda _: None,
+    previous_site: market.Fetch | None = None,
 ) -> ExportSummary:
+    """``previous_site`` reads the published site, whose history archive this export extends
+    with today's official closes, ex-rights events and scores (the holdings page). Without it
+    no market files are written."""
     as_of = market_data.today()
     summary = ExportSummary(as_of)
+    archive = closes = events = None
+    if previous_site is not None:  # read first: a failure must stop before the long analysis
+        archive = market.load_previous(previous_site, config.portfolio.site_url)
+        closes = market_data.official_closes()
+        events = market_data.official_events()
     calibration = load_calibration(config.calibration.output)
     positive = positive_metrics(config.research_score.consistency.walk_forward_results)
     rows = []
@@ -446,6 +456,15 @@ def export_site(
                 "score": _list_score(payload["research_score"]),
             }
         )
+    market_index: dict[str, Any] = {}
+    market_note: list[str] = []
+    if archive is not None:
+        day = market.add_closes(archive, closes)
+        market.add_events(archive, *events)
+        market.add_scores(archive, as_of, rows)
+        market.write_market(out_dir, archive, day, config)
+        market_index = {"archive": market.ARCHIVE, "closes_date": day}
+        market_note = [market.SOURCE_NOTE]
     _write(
         out_dir / "data" / "index.json",
         _clean(
@@ -460,7 +479,8 @@ def export_site(
                     for t in config.research_score.capital_tiers
                 ],
                 "stocks": rows,
-                "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER, ATTRIBUTION],
+                **market_index,
+                "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER, ATTRIBUTION, *market_note],
             }
         ),
     )

@@ -203,19 +203,34 @@ def breakpoints(
             typer.echo(f"{result.metric}: insufficient ({result.reason})")
 
 
+NoMarketOption = typer.Option(
+    False, "--no-market", help="Skip official closes, events and history (local previews)."
+)
+
+
 @app.command("export")
 def export(
     out: Path = OutOption,
     codes: list[str] | None = CodesArgumentApp,
+    no_market: bool = NoMarketOption,
     config: Path = ConfigOption,
 ) -> None:
-    """Analyse the app watchlist at today's date and write JSON for the web app."""
+    """Analyse the app watchlist at today's date and write JSON for the web app.
+
+    Also extends the published site's history of official closes, ex-rights events and
+    scores for the holdings page (reads ``portfolio.site_url``; ``--no-market`` skips it)."""
+    from stock_research.export.market import http_fetch
     from stock_research.export.site import export_site
 
     cfg = _load(config)
     market_data = _open(cfg, batch=True)
     summary = export_site(
-        market_data, cfg, out, codes=[c.strip() for c in codes] if codes else None, progress=_echo
+        market_data,
+        cfg,
+        out,
+        codes=[c.strip() for c in codes] if codes else None,
+        progress=_echo,
+        previous_site=None if no_market else http_fetch(cfg.data_sources.request_timeout_seconds),
     )
     typer.echo(
         f"as_of {summary.as_of}: {len(summary.ok)} ok, {len(summary.blocked)} blocked by data "

@@ -98,7 +98,7 @@
 - `analyze` 在 as_of 為今天時寫入 `validation/forward_log/`（`--no-forward-log` 可關閉）。
 
 ## 網頁 App（使用者決定）
-- 形式：PWA（Safari 加到主畫面），不是原生 iOS App；`web/` 為純 HTML/JS，不需建置，不計算任何數字。
+- 形式：PWA（Safari 加到主畫面），不是原生 iOS App；`web/` 為純 HTML/JS，不需建置，不計算任何數字（例外：`web/portfolio.js` 對使用者自己的持股資料做四則運算，見「持股紀錄」一節）。
 - 範圍：`app.watchlist` 約 50 支；每日由 GitHub Actions（台北 04:17，週一至週五）跑 `stock-research export`，部署到 GitHub Pages（repo 需公開，`FINMIND_TOKEN` 放 GitHub Secret）。
 - 每日匯出不抓同業（`app.with_peers: false`），需產業中位數的框架項目顯示為不可用。FinMind 請求上限調為每小時 550（免費版 600）。
 - 上市日 override 已用 GitHub runner 抓證交所 OpenAPI（t187ap03_L）核對：12 支一致，遠傳 4904 原設 2003-08-01（FinMind 首筆交易）錯誤，官方為 2005-08-24，已更正。證交所個股日成交只到 2010 年、減資資料只到 2011 年，無法補 2011 年前的減資。
@@ -106,6 +106,15 @@
 - 每日匯出遇到 FinMind 額度用完（402）會等待後重試（`quota_retries`、`quota_wait_minutes`），互動指令不等待。
 - 資料檢查未通過的股票照樣列出並顯示失敗項目，不用舊資料替代；資料超過 `app.stale_after_hours` 未更新時 App 顯示警告。
 - v2 第五節改版（第 5 階段）：只做深色（`#0a0a0b` 等，`theme-color`、manifest 同步，`sw.js` 快取 `stock-v2`）；狀態只用小圓點＋文字（不用 emoji，完整報告裡的 emoji 也換成圓點）；列表每列只剩代號名稱、分數、三個面向圓點（滑過／長按顯示名稱）、星號，篩選只留全部／自選／無不穩定＋更多；本金級距選單（記在 localStorage，包 try/catch），各級距分數由匯出程式算好放在 `index.json`；詳細頁首屏只有分數、三面向、整體判定、主要變動最多 3 個，其餘全部預設收合；手機單欄＋表格堆疊、平板兩欄、桌面左右分割（左 360px）。收盤價依 FinMind 條款不放（規格原本要在詳細頁顯示）。驗收截圖與前後項目數見 PR。
+
+## 持股紀錄、損益、賣出提醒、本金試算（使用者 2026-10-17 決定）
+- D1（a）：持股與入出金只存在使用者瀏覽器（IndexedDB／localStorage），提供 JSON 匯出匯入與 CSV 匯出；**任何個人持股資料都不可進 repo 或匯出的 JSON**。畫面提醒備份與「加到主畫面」。
+- D2（a）：允許 JS 只對使用者自己的資料做四則運算（損益、成本、股數分配），全部集中在 `web/portfolio.js` 並有 `node:test` 單元測試（使用者同意加進 CI）；畫面程式不計算。股價、分數、判定與所有參數（手續費、稅、級距、門檻）仍由 Python 匯出，JS 不寫死數字。本規則取代「`web/` 不計算任何數字」，但只限 `web/portfolio.js` 處理使用者資料。
+- D3（a，沿用 v2 的 A）：賣出提醒可寫「考慮減碼／考慮賣出」並列原因；本金試算可建議買哪幾檔、各幾股；每個畫面附免責聲明。
+- 收盤價（a）：持股損益用證交所／櫃買中心 OpenAPI 的收盤價（政府開放資料，標註來源可公開），不放 FinMind 收盤價；全市場都有，所以清單外的股票也能算損益。
+- 股利稅（a）：損益算稅前，註明未扣股利所得稅與二代健保補充保費。
+- 匯出（`export/market.py`）：證交所 `STOCK_DAY_ALL` 與櫃買每日行情（全市場收盤價，兩邊必須同一天）、證交所除權息預告 `TWT48U_ALL` 與櫃買當日除權息、觀察清單每日分數與三面向、`params.json`（費率、稅率、級距、提醒與配置門檻，取自 config 的 `costs`、`research_score`、`portfolio`）。OpenAPI 只有最新一天，所以每次匯出先讀已發布網站（`portfolio.site_url`）的 `data/market/archive.json.gz` 再加上當天資料；網站從沒有過封存檔才從頭開始，曾有卻讀不到就讓匯出失敗（不可默默重來）。證交所條款：網站本身禁止爬蟲，但授權政府資料開放平臺（OpenAPI）的資料可用、轉載需註明來源。證交所除權息預告的無償配股率單位尚未用實例確認，股數不自動調整並標示；櫃買的「每千股配股數」÷1000。`--no-market` 供本機預覽。
+- 主動式 ETF（b）：追蹤 FinMind `TaiwanStockActiveETFInfo` 中全部 `category: domestic` 的台股主動式 ETF（2026-10-17 共 23 檔）；00986A 為海外型排除，00992A 為台股型納入。
 
 ## 0–100 分數（v2 第四節，第 3 階段）
 - 基本分（`research_score`，`analysis/research_score.py`）：A 投資大師原則 40（V1 綜合分數）、B 一致性 20（walk-forward 正向的指標中 V1／V3 一致的比例：全部 20、至少一半 10）、C 估值 15（交易所本益比、股價淨值比在自身 10 年的百分位）、D 風險 15（3 年波動度、最大回撤 ÷ 報酬指數）、E 籌碼 10（三大法人連續買賣超、投信持股變化、融資使用率；第 6 階段起）。缺資料的項目不計、其餘換算成 100；可計算項目少於 70 分就不給分。

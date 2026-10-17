@@ -1,0 +1,67 @@
+[
+ {
+  "Date": "1151016",
+  "Code": "00400A",
+  "Name": "主動國泰動能高息",
+  "TradeVolume": "27595457",
+  "TradeValue": "415025661",
+  "OpeningPrice": "15.05",
+  "HighestPrice": "15.16",
+  "LowestPrice": "14.90",
+  "ClosingPrice": "15.01",
+  "Change": "0.0700",
+  "Transaction": "7336"
+ },
+ {
+  "Date": "1151016",
+  "Code": "0050",
+  "Name": "元大台灣50",
+  "TradeVolume": "122160698",
+  "TradeValue": "13346650893",
+  "OpeningPrice": "109.45",
+  "HighestPrice": "109.70",
+  "LowestPrice": "108.90",
+  "ClosingPrice": "109.00",
+  "Change": "0.1000",
+  "Transaction": "159639"
+ },
+ {
+  "Date": "1151016",
+  "Code": "006208",
+  "Name": "富邦台50",
+  "TradeVolume": "2589727",
+  "TradeValue": "649510857",
+  "OpeningPrice": "250.80",
+  "HighestPrice": "251.70",
+  "LowestPrice": "250.00",
+  "ClosingPrice": "250.35",
+  "Change": "0.2500",
+  "Transaction": "10170"
+ },
+ {
+  "Date": "1151016",
+  "Code": "00981A",
+  "Name": "主動統一台股增長",
+  "TradeVolume": "119905463",
+  "TradeValue": "3550315674",
+  "OpeningPrice": "29.61",
+  "HighestPrice": "29.91",
+  "LowestPrice": "29.32",
+  "ClosingPrice": "29.53",
+  "Change": "0.1300",
+  "Transaction": "42105"
+ },
+ {
+  "Date": "1151016",
+  "Code": "2330",
+  "Name": "台積電",
+  "TradeVolume": "43046982",
+  "TradeValue": "104583063462",
+  "OpeningPrice": "2430.00",
+  "HighestPrice": "2445.00",
+  "LowestPrice": "2420.00",
+  "ClosingPrice": "2420.00",
+  "Change": "-20.0000",
+  "Transaction": "400499"
+ }
+]

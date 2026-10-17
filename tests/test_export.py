@@ -101,7 +101,8 @@ def test_cli_export(config, tmp_path, monkeypatch, write_config, raw_config) -> 
     raw_config["markets"]["tw"]["listing"]["overrides"] = [TSMC_LISTING]
     raw_config["app"]["watchlist"] = ["2330"]
     path = str(write_config(raw_config))
-    result = runner.invoke(app, ["export", "--out", str(tmp_path / "out"), "--config", path])
+    out = str(tmp_path / "out")
+    result = runner.invoke(app, ["export", "--out", out, "--no-market", "--config", path])
     assert result.exit_code == 0, result.output
     assert "1 ok" in result.output
 
@@ -109,7 +110,8 @@ def test_cli_export(config, tmp_path, monkeypatch, write_config, raw_config) -> 
         raise ValueError("boom")
 
     monkeypatch.setattr(site, "run_analysis", broken)
-    result = runner.invoke(app, ["export", "--out", str(tmp_path / "out2"), "--config", path])
+    out2 = str(tmp_path / "out2")
+    result = runner.invoke(app, ["export", "--out", out2, "--no-market", "--config", path])
     assert result.exit_code == 1 and "nothing should be published" in result.output
 
 

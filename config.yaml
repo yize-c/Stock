@@ -681,3 +681,25 @@ robustness:
   # Spec v2 P1-9: warn when an in-sample result is at least this many times the
   # out-of-sample one (calibration: top-minus-bottom group spread; walk-forward: AUC - 0.5).
   overfit_ratio: 2.0
+
+portfolio:
+  # Holdings, P&L, sell reminders and capital suggestions (user decisions 2026-10-17).
+  # Holdings stay in the viewer's browser; the export publishes official TWSE/TPEx closes and
+  # ex-rights events (open data), the tool's score history and these parameters.
+  # The published site: each export extends the history archive found there.
+  site_url: https://yize-c.github.io/Stock/
+  # Codes taxed as ETFs (0.1% securities transaction tax on the sell).
+  etf_code_prefixes: ["00"]
+  alerts:
+    score_drop: 15        # points below the score at purchase
+    score_floor: 45
+    concentration: 0.25   # one holding over this share of total market value
+  allocation:
+    min_score: 60
+    # Candidates whose calibration cap gives this reason are left out (spec: "0050 的歷史表現較好").
+    excluded_cap_reason: 0050 的歷史表現較好
+    max_weight: 0.25
+    cash_reserve: 0.05
+    fallback_etf: "0050"
+    cost_ratio_warning: 0.008
+  backup_reminder_days: 30

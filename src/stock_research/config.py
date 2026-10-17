@@ -896,6 +896,37 @@ class CalibrationConfig(_Model):
         return self
 
 
+class PortfolioAlertsConfig(_Model):
+    """Sell reminders (user decision D3 = A: "考慮減碼／考慮賣出" with reasons)."""
+
+    score_drop: PositiveFloat  # points below the score at purchase
+    score_floor: Annotated[float, Field(ge=0.0, le=100.0)]
+    concentration: Fraction  # one holding's share of total market value
+
+
+class PortfolioAllocationConfig(_Model):
+    """Capital suggestions (version A): which stocks and how many shares."""
+
+    min_score: Annotated[float, Field(ge=0.0, le=100.0)]
+    excluded_cap_reason: str  # candidates whose cap carries this reason are left out
+    max_weight: Fraction
+    cash_reserve: Fraction
+    fallback_etf: str = Field(min_length=1)
+    cost_ratio_warning: Fraction
+
+
+class PortfolioConfig(_Model):
+    """Holdings page (user decisions 2026-10-17). Holdings live only in the viewer's browser;
+    the export publishes official closes, ex-rights events, score history and these
+    parameters."""
+
+    site_url: str = Field(pattern=r"^https://.+/$")  # the published site, to extend history
+    etf_code_prefixes: Annotated[list[str], Field(min_length=1)]
+    alerts: PortfolioAlertsConfig
+    allocation: PortfolioAllocationConfig
+    backup_reminder_days: PositiveInt
+
+
 class RobustnessConfig(_Model):
     """Spec v2 P1: half-life sensitivity and the overfitting warning."""
 
@@ -935,6 +966,7 @@ class AppConfig(_Model):
     research_score: ResearchScoreConfig
     calibration: CalibrationConfig
     robustness: RobustnessConfig
+    portfolio: PortfolioConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:

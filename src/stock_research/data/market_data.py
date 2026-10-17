@@ -360,6 +360,26 @@ class MarketData:
             )
         return first_valued
 
+    def official_closes(self) -> pd.DataFrame:
+        """date, code, name, close of every TWSE and TPEx security on the latest trading day
+        (open data). Both exchanges must report the same day."""
+        if self._twse is None or self._tpex is None:
+            raise MissingDataError(None, "official_closes", None, "TWSE and TPEx OpenAPI fetchers")
+        twse = self._twse.daily_closes()
+        tpex = self._tpex.daily_quotes()[["date", "code", "name", "close"]]
+        days = set(twse["date"]) | set(tpex["date"])
+        if len(days) != 1:
+            raise SourceMismatchError(
+                None, "official_closes.date", sorted(days), "TWSE and TPEx on the same day"
+            )
+        return pd.concat([twse, tpex], ignore_index=True)
+
+    def official_events(self) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """(TWSE ex-rights preview, TPEx ex-rights of the day), open data."""
+        if self._twse is None or self._tpex is None:
+            raise MissingDataError(None, "official_events", None, "TWSE and TPEx OpenAPI fetchers")
+        return self._twse.ex_rights_preview(), self._tpex.ex_rights_today()
+
     def official_listing_date(self, ticker: Ticker) -> date | None:
         """The exchange's own listing date for a currently listed stock, or None when the
         exchange's OpenAPI cannot be read (this development environment) or lacks it."""

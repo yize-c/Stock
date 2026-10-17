@@ -162,6 +162,14 @@ the `FINMIND_TOKEN` repository secret, set Settings → Pages → Source to "Git
 merge the workflow into the default branch (scheduled workflows only run there). On the
 iPhone, open the Pages URL in Safari → Share → Add to Home Screen.
 
+For the holdings page the export also publishes official closes of every TWSE/TPEx security
+and their ex-rights / ex-dividend events (government open data, source stated), the
+watchlist's daily scores and the page's parameters (`data/market/`, `data/params.json`). The
+OpenAPIs only return the latest day, so each export reads the archive from the published site
+(`portfolio.site_url`) and extends it; if the site once had an archive and it cannot be read,
+the export fails rather than start over. Holdings themselves never leave the viewer's
+browser. `--no-market` skips this for local previews.
+
 Industry peers are skipped in the daily export (`app.with_peers: false`): fetching every peer's
 statements does not fit FinMind's free tier, so framework items that need industry medians
 show as unavailable.
