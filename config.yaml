@@ -703,3 +703,16 @@ portfolio:
     fallback_etf: "0050"
     cost_ratio_warning: 0.008
   backup_reminder_days: 30
+
+growth:
+  # 成長 × 風險 §1.1 (the senior investor's view, 2026-10-17): the last lookback_years of
+  # actual results, published by as_of, as a reference for future growth (not a forecast).
+  # Each item maps linearly from 0 (at zero) to 1 (at full), clipped; the score is 100 x the
+  # weighted mean of the items with data. Ratios are fractions (0.20 = 20%).
+  lookback_years: 3
+  min_items: 2
+  min_trend_points: 8
+  revenue_cagr: { weight: 0.3, zero: 0.0, full: 0.20 }
+  eps_cagr: { weight: 0.3, zero: 0.0, full: 0.25 }
+  revenue_yoy: { weight: 0.2, zero: 0.0, full: 0.20 }
+  gross_margin_trend: { weight: 0.2, zero: -0.02, full: 0.02 }  # per year: -2 to +2 points

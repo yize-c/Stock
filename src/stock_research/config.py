@@ -927,6 +927,43 @@ class PortfolioConfig(_Model):
     backup_reminder_days: PositiveInt
 
 
+class BandConfig(_Model):
+    """A linear 0-1 scale: 0 at ``zero``, 1 at ``full`` (either direction), clipped."""
+
+    zero: float
+    full: float
+
+    @model_validator(mode="after")
+    def _check(self) -> BandConfig:
+        if self.zero == self.full:
+            raise ValueError("a band needs zero != full")
+        return self
+
+
+class GrowthItemConfig(BandConfig):
+    weight: Annotated[float, Field(ge=0.0)]
+
+
+class GrowthConfig(_Model):
+    """Growth score (成長 × 風險 §1.1): the last ``lookback_years`` of actual, published
+    results as a reference for future growth, not a forecast. Each item maps linearly to 0-1
+    with its band; the score is 100 x the weighted mean of the items with data."""
+
+    lookback_years: PositiveInt
+    min_items: PositiveInt  # fewer items with data: no growth score
+    min_trend_points: Annotated[int, Field(ge=3)]  # TTM gross margins needed for the trend
+    revenue_cagr: GrowthItemConfig  # last 12 months' revenue vs the same months years ago
+    eps_cagr: GrowthItemConfig  # TTM EPS (one share basis) vs the TTM years ago
+    revenue_yoy: GrowthItemConfig  # mean monthly revenue YoY of the last 12 months
+    gross_margin_trend: GrowthItemConfig  # slope of TTM gross margin, per year
+
+    @model_validator(mode="after")
+    def _check(self) -> GrowthConfig:
+        if self.min_items > 4:
+            raise ValueError("growth.min_items cannot exceed the 4 items")
+        return self
+
+
 class RobustnessConfig(_Model):
     """Spec v2 P1: half-life sensitivity and the overfitting warning."""
 
@@ -967,6 +1004,7 @@ class AppConfig(_Model):
     calibration: CalibrationConfig
     robustness: RobustnessConfig
     portfolio: PortfolioConfig
+    growth: GrowthConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:

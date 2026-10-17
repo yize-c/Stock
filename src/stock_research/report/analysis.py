@@ -157,6 +157,34 @@ def _summary(a: Analysis, shown: tuple[WindowName, ...], single: bool) -> list[s
     lines += [f"- 綜合分數：{scores}", f"- {SCORE_DISCLAIMER}", ""]
     if WindowName.POST_2020 in shown:
         lines += _plain_principles(a)
+    lines += _growth_risk(a)
+    return lines
+
+
+def _growth_value(item) -> str:
+    if item.value is None:
+        return "—"
+    if item.key == "gross_margin_trend":
+        return f"{item.value * 100:+.2f} 個百分點／年"
+    return pct(item.value, 1)
+
+
+def _growth_risk(a: Analysis) -> list[str]:
+    """成長 × 風險: the last few years' actual growth (not a forecast)."""
+    g = a.growth
+    lines = [f"### 成長與風險（最近 {g.years} 年）", ""]
+    score = f"{g.score:.0f}／100" if g.score is not None else f"無法計算（{g.problem}）"
+    lines += [f"- 成長分數：{score}。{g.note}", ""]
+    rows = [
+        [
+            item.name,
+            _growth_value(item),
+            "—" if item.score is None else f"{item.score * 100:.0f}",
+            item.detail,
+        ]
+        for item in g.items
+    ]
+    lines += table(["項目", "數值", "得分（0-100）", "計算期間與說明"], rows) + [""]
     return lines
 
 
