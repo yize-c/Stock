@@ -45,6 +45,8 @@ PROBES = {
     # Central bank: home page and the interest-rate statistics page.
     "cbc_home": "https://www.cbc.gov.tw/tw/mp-1.html",
     "cbc_rates": "https://www.cbc.gov.tw/tw/lp-370-1.html",
+    # Monthly history of the five largest banks' deposit and lending rates.
+    "cbc_rate_history": "https://www.cbc.gov.tw/tw/np-1166-1.html",
     # DGBAS (CPI) and the government open-data portal.
     "dgbas_home": "https://www.dgbas.gov.tw/",
     "dgbas_statdb": "https://nstatdb.dgbas.gov.tw/dgbasAll/webMain.aspx?k=dgmain",
@@ -59,6 +61,7 @@ PROBES = {
 LINK_KEYWORDS = {
     "cbc_home": ("利率", "存款", "牌告"),
     "cbc_rates": ("利率", "存款", "牌告", ".xls", ".csv", ".ods"),
+    "cbc_rate_history": (".xls", ".csv", ".ods", ".pdf", "下載", "dl-", "public/data"),
     "dgbas_statdb": ("物價", "CPI", "消費者"),
     "stat_gov_tw_home": ("物價", "CPI", "消費者"),
     "data_gov_tw_cpi_page": (".csv", ".xml", ".json", "下載"),

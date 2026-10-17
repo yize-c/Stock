@@ -29,6 +29,17 @@ jobs:
         run: |
           pip install --quiet certifi
           SSL_CERT_FILE="$(python -m certifi)" python scripts/probe_sources.py probe
+      # DGBAS hosts fail certificate verification: show the chain and where the issuing
+      # certificate can be fetched (verification stays on; nothing is bypassed).
+      - name: Certificate chain of DGBAS hosts
+        run: |
+          for host in ws.dgbas.gov.tw www.stat.gov.tw; do
+            echo "=== $host"
+            echo | openssl s_client -connect "$host:443" -servername "$host" 2>/dev/null \
+              | sed -n '/Certificate chain/,/---/p'
+            echo | openssl s_client -connect "$host:443" -servername "$host" 2>/dev/null \
+              | openssl x509 -noout -subject -issuer -ext authorityInfoAccess || true
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: probe-responses
