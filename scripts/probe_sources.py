@@ -9,6 +9,7 @@ plain GET requests, no credentials. Standard library only.
 from __future__ import annotations
 
 import json
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -47,7 +48,20 @@ PROBES = {
     # DGBAS (CPI) and the government open-data portal.
     "dgbas_home": "https://www.dgbas.gov.tw/",
     "dgbas_statdb": "https://nstatdb.dgbas.gov.tw/dgbasAll/webMain.aspx?k=dgmain",
-    "data_gov_tw_search_cpi": "https://data.gov.tw/api/v2/rest/dataset?q=%E6%B6%88%E8%B2%BB%E8%80%85%E7%89%A9%E5%83%B9",
+    "stat_gov_tw_home": "https://www.stat.gov.tw/",
+    # DGBAS long-run CPI workbook (location as published on the DGBAS price-statistics page).
+    "dgbas_cpi_workbook": "https://ws.dgbas.gov.tw/001/Upload/463/relfile/10315/2/cpispl.xls",
+    "data_gov_tw_cpi_page": "https://data.gov.tw/dataset/6019",
+}
+
+# Pages whose links are listed when the link text or address contains one of the keywords,
+# to find the data files behind them.
+LINK_KEYWORDS = {
+    "cbc_home": ("利率", "存款", "牌告"),
+    "cbc_rates": ("利率", "存款", "牌告", ".xls", ".csv", ".ods"),
+    "dgbas_statdb": ("物價", "CPI", "消費者"),
+    "stat_gov_tw_home": ("物價", "CPI", "消費者"),
+    "data_gov_tw_cpi_page": (".csv", ".xml", ".json", "下載"),
 }
 
 
@@ -74,6 +88,24 @@ def probe(name: str, url: str, out: Path) -> dict[str, object]:
     }
 
 
+ANCHOR = re.compile(r"<a\s[^>]*href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>", re.I | re.S)
+TAG = re.compile(r"<[^>]+>")
+
+
+def links(out: Path, name: str, keywords: tuple[str, ...]) -> None:
+    path = out / f"{name}.body"
+    if not path.exists():
+        return
+    text = path.read_bytes().decode("utf-8", errors="replace")
+    print(f"=== links in {name}")
+    seen = set()
+    for href, label in ANCHOR.findall(text):
+        label = " ".join(TAG.sub("", label).split())
+        if any(k in href or k in label for k in keywords) and (href, label) not in seen:
+            seen.add((href, label))
+            print(f"{label[:60]} -> {href}")
+
+
 def main() -> int:
     out = Path(sys.argv[1] if len(sys.argv) > 1 else "probe")
     out.mkdir(parents=True, exist_ok=True)
@@ -84,6 +116,8 @@ def main() -> int:
         for key in ("url", "status", "content_type", "bytes", "error", "preview"):
             if key in r:
                 print(f"{key}: {r[key]}")
+    for name, keywords in LINK_KEYWORDS.items():
+        links(out, name, keywords)
     # Listing dates for the stocks whose dates are configured by hand.
     info = out / "twse_company_info.body"
     if info.exists():

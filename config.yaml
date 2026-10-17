@@ -110,82 +110,51 @@ markets:
       # Listing dates that cannot be derived from the data (a stock that first traded after
       # emerging_board_start and was listed before valuation_coverage_start).
       # Format: - { ticker: "1234", listing_date: 2004-03-15, source: "TWSE listing notice" }
+      # Verified against TWSE OpenAPI t187ap03_L (上市日期), fetched 2026-10-17 from a GitHub
+      # runner (scripts/probe_sources.py); the development environment cannot reach TWSE.
       overrides:
-        - ticker: "3231"
-          listing_date: 2003-08-19
-          source: >-
-            Wistron IPO on TWSE, Aug 2003 (public record); FinMind's first trade is
-            2003-08-19 with no earlier emerging-board trades, and TaiwanStockPER starts only
-            at its 2005-09-02 coverage start.
         - ticker: "2885"
           listing_date: 2002-02-04
-          source: >-
-            Yuanta FHC (formerly Fuhwa FHC) listed on formation by share swap; FinMind's first trade is 2002-02-04 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020204."
         - ticker: "2886"
           listing_date: 2002-02-04
-          source: >-
-            Mega FHC (formerly Chiao Tung FHC) listed on formation by share swap; FinMind's first trade is 2002-02-04 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020204."
         - ticker: "2887"
           listing_date: 2002-02-18
-          source: >-
-            Taishin FHC listed on formation by share swap; FinMind's first trade is 2002-02-18 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020218."
         - ticker: "2890"
           listing_date: 2002-05-09
-          source: >-
-            SinoPac FHC listed on formation by share swap; FinMind's first trade is 2002-05-09 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020509."
         - ticker: "2891"
           listing_date: 2002-05-17
-          source: >-
-            CTBC FHC (formerly Chinatrust FHC) listed on formation by share swap; FinMind's first trade is 2002-05-17 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020517."
         - ticker: "2892"
           listing_date: 2003-01-02
-          source: >-
-            First FHC listed on formation by share swap; FinMind's first trade is 2003-01-02 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20030102."
         - ticker: "3008"
           listing_date: 2002-03-11
-          source: >-
-            Largan listed on TWSE; FinMind's first trade is 2002-03-11 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020311."
         - ticker: "3017"
           listing_date: 2002-09-27
-          source: >-
-            Asia Vital Components listed on TWSE; FinMind's first trade is 2002-09-27 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020927."
         - ticker: "3034"
           listing_date: 2002-08-26
-          source: >-
-            Novatek listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020826."
         - ticker: "3037"
           listing_date: 2002-08-26
-          source: >-
-            Unimicron listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020826."
         - ticker: "3045"
           listing_date: 2002-08-26
-          source: >-
-            Taiwan Mobile listed on TWSE; FinMind's first trade is 2002-08-26 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20020826."
+        - ticker: "3231"
+          listing_date: 2003-08-19
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20030819."
         - ticker: "4904"
-          listing_date: 2003-08-01
-          source: >-
-            Far EasTone listed on TWSE; FinMind's first trade is 2003-08-01 and TaiwanStockPER starts only at its
-            2005-09-02 coverage start. A long-listed large cap, not emerging-board trading.
+          listing_date: 2005-08-24
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20050824. FinMind's earlier prices (from 2003-08-01) are not used."
         - ticker: "6505"
           listing_date: 2003-12-26
-          source: >-
-            Formosa Petrochemical listed on TWSE; FinMind's first trade is 2003-12-26 and
-            TaiwanStockPER starts only at its 2005-09-02 coverage start. A long-listed large
-            cap, not emerging-board trading.
-    # Prices before a capital change whose reference price is missing from FinMind cannot be
-    # adjusted; such a stock's prices start on the day trading resumed after the last one.
-    # Format: - { ticker: "1234", start: 2009-03-20, reason: "..." }
+          source: "TWSE OpenAPI t187ap03_L 上市日期 20031226."
     # Unexplained multi-day halts before FinMind's capital-reduction coverage are detected
     # automatically (data/early_changes.py). Use this only for other cases that make early
     # prices unusable. Format: - { ticker: "1234", start: 2009-03-20, reason: "..." }
