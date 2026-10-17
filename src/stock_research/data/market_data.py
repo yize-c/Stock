@@ -47,6 +47,7 @@ from stock_research.data.fetchers.finmind import (
     auth_headers,
 )
 from stock_research.data.fetchers.tpex import TpexFetcher
+from stock_research.data.fetchers.twse import TwseFetcher
 from stock_research.data.fetchers.yahoo import YahooFetcher
 from stock_research.data.http import JsonClient, RateLimiter, SourceUnavailableError
 from stock_research.data.point_in_time import as_of_view
@@ -149,8 +150,10 @@ class _Memo:
     calendar: TradingCalendar | None = None
     info: pd.DataFrame | None = None
     raw: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = field(default_factory=dict)
+    daily: dict[str, pd.DataFrame] = field(default_factory=dict)
     uncovered: dict[str, list[UncoveredCapitalChange]] = field(default_factory=dict)
     risk_free: RiskFreeRates | None = None
+    official_listing: dict[str, date] | None = None
 
 
 class MarketData:
@@ -163,6 +166,7 @@ class MarketData:
         *,
         peer_finmind: FinMindFetcher | None = None,
         cbc: CbcFetcher | None = None,
+        twse: TwseFetcher | None = None,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._config = config
@@ -173,6 +177,7 @@ class MarketData:
         self._yahoo = yahoo
         self._tpex = tpex
         self._cbc = cbc
+        self._twse = twse
         self._clock = clock
         self._memo = _Memo()
 
@@ -247,6 +252,23 @@ class MarketData:
     def resolve(self, code: str) -> Ticker:
         return self.stock_info(code).ticker
 
+    def common_stocks(self, excluded_prefixes: list[str]) -> pd.DataFrame:
+        """code, data_date: four-digit TWSE/TPEx codes listed now or delisted (FinMind keeps
+        their last rows, dated when they stopped), minus the configured prefixes."""
+        if self._memo.info is None:
+            self._memo.info = self._finmind.stock_info()
+        info = self._memo.info.loc[self._memo.info["market"].notna()]
+        wanted = [
+            bool(re.fullmatch(r"[1-9]\d{3}", c)) and not c.startswith(tuple(excluded_prefixes))
+            for c in info["code"].astype(str)
+        ]
+        return info.loc[wanted, ["code", "data_date"]].sort_values("code").reset_index(drop=True)
+
+    def delisting_dates(self) -> dict[str, date]:
+        """Last listed day + 1 for every delisted code (the latest delisting if reused)."""
+        rows = self._finmind.delistings().sort_values("delisted_on")
+        return dict(zip(rows["code"], rows["delisted_on"], strict=True))
+
     # --- industries ---------------------------------------------------------------------------
 
     def _candidate_industries(self, categories: tuple[str, ...]) -> set[str]:
@@ -318,21 +340,43 @@ class MarketData:
         overrides = {o.ticker: o.listing_date for o in self._tw.listing.overrides}
         if ticker.code in overrides:
             return overrides[ticker.code]
-        first_traded = min(self._raw_prices(ticker)[0]["date"])
+        first_traded = min(self.raw_daily(ticker)["date"])
         if first_traded < self._tw.listing.emerging_board_start:
             return None
         sources = self._config.data_sources.finmind
         valued = self._finmind.valuation_dates(ticker.code, sources.history_start, self.today())
         first_valued = next((d for d in valued if d >= first_traded), None)
         if first_valued is None or first_valued <= sources.valuation_coverage_start:
+            official = self.official_listing_date(ticker)
+            if official is not None and official >= first_traded:
+                return official
             raise MissingDataError(
                 ticker.code,
                 "listing_date",
                 f"first trade {first_traded}, first valuation day {first_valued}",
-                f"a valuation day after {sources.valuation_coverage_start} "
-                "or a listing date in markets.tw.listing.overrides",
+                f"a valuation day after {sources.valuation_coverage_start}, an official "
+                "listing date (TWSE/TPEx OpenAPI) or a listing date in "
+                "markets.tw.listing.overrides",
             )
         return first_valued
+
+    def official_listing_date(self, ticker: Ticker) -> date | None:
+        """The exchange's own listing date for a currently listed stock, or None when the
+        exchange's OpenAPI cannot be read (this development environment) or lacks it."""
+        if self._memo.official_listing is None:
+            dates: dict[str, date] = {}
+            for read in (
+                lambda: self._tpex.listed_companies() if self._tpex is not None else None,
+                lambda: self._twse.listing_dates() if self._twse is not None else None,
+            ):
+                try:
+                    frame = read()
+                except DataValidationError:
+                    continue
+                if frame is not None:
+                    dates |= dict(zip(frame["code"], frame["listing_date"], strict=True))
+            self._memo.official_listing = dates
+        return self._memo.official_listing.get(ticker.code)
 
     def prices(self, ticker: Ticker, as_of: date) -> AdjustedPrices:
         """Listed-period prices from ``price_history_start`` on, adjusted as of ``as_of``."""
@@ -377,11 +421,17 @@ class MarketData:
         """Full FinMind history (including any emerging-board period) and price events."""
         if ticker.code not in self._memo.raw:
             start = self._config.data_sources.finmind.history_start
-            today = self.today()
-            raw = self._finmind.prices(ticker.code, start, today)
-            events = self._finmind.price_events(ticker.code, start, today)
-            self._memo.raw[ticker.code] = (raw, events)
+            events = self._finmind.price_events(ticker.code, start, self.today())
+            self._memo.raw[ticker.code] = (self.raw_daily(ticker), events)
         return self._memo.raw[ticker.code]
+
+    def raw_daily(self, ticker: Ticker) -> pd.DataFrame:
+        """Unadjusted daily prices, volume and turnover for the full FinMind history (one
+        request; no price events), e.g. for liquidity screens."""
+        if ticker.code not in self._memo.daily:
+            start = self._config.data_sources.finmind.history_start
+            self._memo.daily[ticker.code] = self._finmind.prices(ticker.code, start, self.today())
+        return self._memo.daily[ticker.code]
 
     def etf_prices(self, code: str, as_of: date) -> AdjustedPrices:
         """An ETF's dividend-adjusted prices from ``price_history_start`` (no listing check:
@@ -418,6 +468,24 @@ class MarketData:
         start = date(self._config.general.ifrs_start_year - 1, 1, 1)
         rows = self._finmind.monthly_revenue(ticker.code, start, self.today())
         return as_of_view(rows, as_of).reset_index(drop=True)
+
+    def exchange_valuation(self, ticker: Ticker, as_of: date) -> pd.DataFrame:
+        """Daily exchange P/E and P/B published on or before ``as_of`` (end of day)."""
+        sources = self._config.data_sources.finmind
+        rows = self._finmind.exchange_valuation(ticker.code, sources.history_start, self.today())
+        return rows.loc[[d <= as_of for d in rows["date"]]].reset_index(drop=True)
+
+    def institutional(self, ticker: Ticker, as_of: date) -> pd.DataFrame:
+        """Daily institutional buys and sells (shares) by investor type, up to ``as_of``."""
+        start = self._config.data_sources.finmind.chips_history_start
+        rows = self._finmind.institutional(ticker.code, start, self.today())
+        return rows.loc[[d <= as_of for d in rows["date"]]].reset_index(drop=True)
+
+    def margin(self, ticker: Ticker, as_of: date) -> pd.DataFrame:
+        """Daily margin purchase balance and limit, up to ``as_of``."""
+        start = self._config.data_sources.finmind.chips_history_start
+        rows = self._finmind.margin(ticker.code, start, self.today())
+        return rows.loc[[d <= as_of for d in rows["date"]]].reset_index(drop=True)
 
     def dividends(self, ticker: Ticker, as_of: date) -> pd.DataFrame:
         """Declared dividends and rights offerings announced by ``as_of``.
@@ -463,8 +531,13 @@ class MarketData:
 
     # --- validation -------------------------------------------------------------------------
 
-    def health_report(self, code: str, as_of: date) -> HealthReport:
+    def health_report(self, code: str, as_of: date, *, cross_source: bool = True) -> HealthReport:
+        """Every data check for ``code`` at ``as_of``. ``cross_source=False`` skips the Yahoo
+        comparison (the full-market calibration: Yahoo has no delisted stocks); the report
+        then says so."""
         report = HealthReport(ticker=code, as_of=as_of, limitations=list(LIMITATIONS))
+        if not cross_source:
+            report.limitations.append("本次未做 FinMind 與 Yahoo 的收盤價交叉比對（全市場校準）。")
         now = self.now
 
         calendar = _attempt(report, "calendar", self.calendar)
@@ -477,7 +550,7 @@ class MarketData:
         if prices is not None:
             for change in self._memo.uncovered.get(ticker.code, []):
                 report.limitations.append(change.describe(ticker.code))
-            self._price_checks(report, ticker, prices, calendar, as_of, now)
+            self._price_checks(report, ticker, prices, calendar, as_of, now, cross_source)
         bench = _attempt(report, "benchmark.fetch", lambda: self.benchmark(as_of))
         if bench is not None:
             report.add_source(
@@ -556,6 +629,7 @@ class MarketData:
         calendar: TradingCalendar,
         as_of: date,
         now: datetime,
+        cross_source: bool = True,
     ) -> None:
         code = ticker.code
         raw = prices.raw
@@ -593,11 +667,12 @@ class MarketData:
             "prices.freshness",
             lambda: check_freshness(code, latest, calendar, as_of, now),
         )
-        _attempt(
-            report,
-            "prices.cross_source",
-            lambda: self._cross_source(report, ticker, prices, as_of, now),
-        )
+        if cross_source:
+            _attempt(
+                report,
+                "prices.cross_source",
+                lambda: self._cross_source(report, ticker, prices, as_of, now),
+            )
 
     def _cross_source(
         self,
@@ -677,7 +752,13 @@ class MarketData:
 
     @classmethod
     def open(
-        cls, config: AppConfig, secrets: Secrets, cache: Cache, *, wait_on_quota: bool = False
+        cls,
+        config: AppConfig,
+        secrets: Secrets,
+        cache: Cache,
+        *,
+        wait_on_quota: bool = False,
+        clock: Callable[[], datetime] | None = None,
     ) -> MarketData:
         sources = config.data_sources
         finmind = sources.finmind
@@ -726,6 +807,17 @@ class MarketData:
                 cache,
                 timeout_seconds=sources.request_timeout_seconds,
             ),
+            twse=TwseFetcher(
+                JsonClient(
+                    "twse",
+                    session,
+                    RateLimiter(sources.official.min_request_interval_seconds),
+                    cache,
+                    timeout_seconds=sources.request_timeout_seconds,
+                ),
+                max_age,
+            ),
+            **({"clock": clock} if clock is not None else {}),
         )
 
 

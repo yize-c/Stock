@@ -420,6 +420,9 @@ data_sources:
     # First day of TaiwanStockPER, which comes from the exchanges' daily valuation files.
     # Those cover listed stocks only, so a later first date is the listing date.
     valuation_coverage_start: 2005-09-02
+    # Institutional buy/sell and margin balances (score part E) are read from this date;
+    # the calibration starts in 2021, so earlier days are never used.
+    chips_history_start: 2020-01-01
   official:
     # Minimum delay between requests to TWSE / TPEx / MOPS endpoints.
     min_request_interval_seconds: 3.0
@@ -553,25 +556,6 @@ app:
   # A published dataset older than this is flagged as stale in the app.
   stale_after_hours: 36
 
-backtest:
-  # Historical backtest reference for the composite score (rule changed by the user on
-  # 2026-10-17; see CLAUDE.md core principle 4). Every value below was fixed before the first
-  # backtest ran. Changing them after seeing results must be recorded in backtest/CHANGELOG.md.
-  output: backtest/score_backtest.json
-  # First month-end base date (V1 needs some post-2020 statements before its score means much).
-  start: 2021-06-30
-  horizons_months: [3, 6, 12]
-  # Bucket edges for the V1 composite score: [0, 0.4), [0.4, 0.6), [0.6, 0.8), [0.8, 1].
-  score_bins: [0.4, 0.6, 0.8]
-  # Label rule: on this horizon, a bucket whose excess-return confidence interval lies wholly
-  # above 0 is 買進參考, wholly below 0 is 賣出參考, otherwise 持有參考. Buckets with fewer
-  # observations than min_bucket_observations get no label.
-  label_horizon_months: 6
-  min_bucket_observations: 30
-  confidence: 0.95
-  bootstrap_draws: 1000
-  seed: 20210630
-
 costs:
   # Taiwan trading costs (spec v2 §3). Fees are charged on both the buy and the sell; the
   # securities transaction tax only on the sell.
@@ -585,3 +569,98 @@ costs:
   board_lot: 1000
   # Position size (NT$) for cost-adjusted returns where no capital tier applies.
   reference_position: 100000
+
+research_score:
+  # The 0-100 score of spec v2 §4 (user's choice A, 2026-10-17). Base score from five parts;
+  # a part without data is left out and the others are scaled to 100, but with fewer than
+  # min_available_points of parts available there is no score.
+  points: { principles: 40, consistency: 20, valuation: 15, risk: 15, chips: 10 }
+  min_available_points: 70
+  consistency:
+    # B: among the metrics whose walk-forward is positive (written by
+    # `stock-research validation metric-walk-forward`), the share judged STABLE.
+    walk_forward_results: validation/results/metric_walk_forward.json
+    full_share: 1.0
+    partial_share: 0.5
+  valuation:
+    # C: percentile of today's exchange P/E and P/B among the stock's own daily values over
+    # the last lookback_years (lower is better); needs at least min_years of history.
+    lookback_years: 10
+    min_years: 3
+  risk:
+    # D: daily volatility and maximum drawdown of the adjusted price over lookback_years,
+    # each divided by the TAIEX total-return index's; a ratio at or below ratio_full scores
+    # full points, at or above ratio_zero none, linearly between.
+    lookback_years: 3
+    min_trading_days: 250
+    ratio_full: 1.0
+    ratio_zero: 3.0
+  chips:
+    # E: net buying by these investors over the last lookback_trading_days as a share of
+    # traded volume (net_share_full of buying = full points, the same of selling = none),
+    # and margin purchase balance / limit (margin_usage_zero or more = none).
+    lookback_trading_days: 20
+    investors: [Foreign_Investor, Foreign_Dealer_Self, Investment_Trust]
+    net_share_full: 0.10
+    margin_usage_zero: 0.5
+  # Capital tiers the export scores in advance (spec: 5萬, 30萬, 100萬, 300萬) with a holding
+  # count inside the spec's range for each (<5萬: 1-3, 5-30萬: 3-5, 30-100萬: 5-10,
+  # >100萬: 10-20). The web app only switches between them.
+  capital_tiers:
+    - { capital: 50000, holdings: 3 }
+    - { capital: 300000, holdings: 5 }
+    - { capital: 1000000, holdings: 10 }
+    - { capital: 3000000, holdings: 15 }
+  default_capital: 300000
+  capital_factor:
+    # Spec §4.3: -0.2 at each cost-ratio step, -0.1 if only odd lots fit, -0.1 if one
+    # position is over 25% of capital; never below 0.5.
+    cost_ratio_steps: [0.008, 0.012]
+    cost_step_penalty: 0.2
+    odd_lot_penalty: 0.1
+    concentration: 0.25
+    concentration_penalty: 0.1
+    floor: 0.5
+  caps:
+    # Spec §4.2: a score group whose historical average (net of costs) does not beat the
+    # deposit rate is capped at below_risk_free; one that does worse than 0050, at below_etf.
+    below_risk_free: 40
+    below_etf: 55
+  labels:
+    - { min_score: 75, name: 強 }
+    - { min_score: 60, name: 中 }
+    - { min_score: 45, name: 觀察 }
+    - { min_score: 0, name: 弱, note: "0050 或定存的歷史表現較好" }
+
+calibration:
+  # Full-market calibration of the base score (spec v2 §4.2), run on GitHub Actions with
+  # the second FinMind token. Values fixed before the first run; later changes are
+  # recorded in calibration/CHANGELOG.md.
+  output: calibration/score_calibration.json
+  work_dir: calibration/work
+  cache_dir: .cache/calibration
+  cache_max_age_days: 60
+  # Every source is read as of this date (a fixed clock), so the multi-day GitHub runs share
+  # one cache and one result.
+  data_as_of: 2026-10-16
+  # Month-end base dates from start to last_base_date; each needs its 12-month horizon to
+  # have passed by data_as_of.
+  start: 2021-06-30
+  last_base_date: 2025-09-30
+  horizon_months: 12
+  # Base dates from here on are out of sample: the score-group table shown and the gate
+  # use only them; earlier ones are reported as in-sample for comparison.
+  out_of_sample_start: 2024-01-31
+  # Each month keep the most traded half (60-day average traded value) of the stocks.
+  liquidity_lookback_trading_days: 60
+  liquidity_keep_share: 0.5
+  # Score groups per month (deciles). Gate: the top group's out-of-sample return must beat
+  # the bottom group's and the rank correlation between group and return must reach this.
+  groups: 10
+  min_rank_correlation: 0.7
+  confidence: 0.95
+  bootstrap_draws: 1000
+  seed: 20211031
+  shards: 30
+  # Not common shares: ETFs/ETNs (00...), TDRs (91...).
+  excluded_code_prefixes: ["0", "91"]

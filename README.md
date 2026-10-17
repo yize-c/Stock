@@ -77,10 +77,10 @@ Further limits found while building the data layer:
 
 - No automated trading or broker integration
 - No target prices and no claims that a price will rise or fall
-- Buy/hold/sell labels appear only as a **historical backtest reference** (rule changed by the
-  user on 2026-10-17): composite-score buckets backtested point-in-time, shown with mean excess
-  return, hit rate, sample size and confidence interval, labelled by a rule fixed in
-  `config.yaml` before the backtest ran. They are historical statistics, not advice
+- The 0-100 score and its labels (強／中／觀察／弱) are a **historical backtest reference**
+  (rule changed by the user on 2026-10-17): calibrated out of sample on the whole market,
+  shown with the group's historical average net of costs, its interval and sample size, and
+  published only if the calibration passes its gate. They are historical statistics, not advice
 - Framework scores and stability verdicts are descriptions, not recommendations
 - The stability-verdict validation never uses subsequent price moves as its measure of success
 
@@ -158,18 +158,25 @@ Industry peers are skipped in the daily export (`app.with_peers: false`): fetchi
 statements does not fit FinMind's free tier, so framework items that need industry medians
 show as unavailable.
 
-## Historical backtest reference
+## 0-100 score and its calibration
 
-`stock-research backtest` computes, for every month end from 2021-06-30 and every watchlist
-stock, the V1 composite score from data available on that date, and the excess return over
-the TAIEX total-return index over the next 3, 6 and 12 months. Scores are grouped into buckets
-(`backtest.score_bins`); each bucket gets the mean excess return, hit rate, sample size and a
-block-bootstrap confidence interval (blocks = stock × year, since monthly base dates overlap).
-The reference label follows a rule fixed in `config.yaml` before the first run: on the 6-month
-horizon, an interval wholly above 0 is 買進參考, wholly below 0 is 賣出參考, otherwise 持有參考.
-Results go to `backtest/score_backtest.json`; rule changes are logged in
-`backtest/CHANGELOG.md`. The watchlist holds currently listed stocks only, so the history is
-survivorship-biased. These are historical statistics, not forecasts or advice.
+The score (spec v2 §4) has a base part that does not depend on capital: investor principles
+40 (the V1 framework composite), consistency 20 (V1/V3 agreement on the metrics whose
+walk-forward is positive), valuation 15 (today's exchange P/E and P/B as percentiles of the
+stock's own 10 years), risk 15 (3-year volatility and drawdown against the total-return
+index) and chips 10 (institutional net buying and margin use). Parts without data are left
+out and the rest scaled to 100. Each capital tier (NT$50k, 300k, 1M, 3M) then multiplies the
+base score by a capital factor (trading-cost ratio, odd lots, concentration) and applies the
+calibration's cap.
+
+`.github/workflows/calibration.yml` calibrates it on GitHub Actions with a second FinMind
+token: every month end from 2021-06-30 to 2025-09-30, all TWSE/TPEx common stocks (including
+those delisted since), the most traded half each month, ten score groups, and each stock's
+next-12-month return net of one round trip for the tier's position. Base dates from
+2024-01-31 on are out of sample; the group table, the caps (no better than the deposit rate →
+40; worse than 0050 → 55) and the gate (top group above bottom group, rank correlation ≥ 0.7)
+use them only. If the gate fails the score is not published. Rules are logged in
+`calibration/CHANGELOG.md`; the result is `calibration/score_calibration.json`.
 
 ## Official sources (probe)
 

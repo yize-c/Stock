@@ -49,10 +49,13 @@ def valuation_history(
         return pd.DataFrame(columns=["date", "pe", "pb"])
     first = max(min(prices["date"]), basis.start)
     ends = pd.date_range(first, window.price_end, freq="ME")
+    unrestated = ttm_table(quarterly, None, window.price_end)  # once, not once per month
     rows = []
     for end in ends:
         try:
-            v = valuation_snapshot(ticker, end.date(), prices, quarterly, dividends, basis)
+            v = valuation_snapshot(
+                ticker, end.date(), prices, quarterly, dividends, basis, unrestated_ttm=unrestated
+            )
         except DataValidationError:
             continue
         rows.append({"date": end.date(), "pe": v.pe, "pb": v.pb})

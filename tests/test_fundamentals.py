@@ -184,6 +184,22 @@ def test_valuation_snapshot_uses_only_published_figures(quarterly) -> None:
     assert value.latest_quarter_eps_yoy == pytest.approx(3.90 / 3.44 - 1)
 
 
+def test_valuation_snapshot_with_a_precomputed_table_matches(quarterly) -> None:
+    """valuation_history computes the unrestated TTM table once; picking the row published
+    by each date must give exactly what computing the table for that date gives."""
+    dividends = normalize_dividends(rows("finmind_dividend_2330.json"), "2330")
+    prices = pd.DataFrame(
+        {"date": [date(2019, 3, 29), date(2019, 12, 31)], "close": [240.0, 331.0]}
+    )
+    table = ttm_table(quarterly, None, date(2019, 12, 31))
+    for on in (date(2019, 3, 31), date(2019, 6, 30), date(2019, 12, 31)):
+        slow = valuation_snapshot("2330", on, prices, quarterly, dividends, NO_EVENTS)
+        fast = valuation_snapshot(
+            "2330", on, prices, quarterly, dividends, NO_EVENTS, unrestated_ttm=table
+        )
+        assert fast == slow
+
+
 def test_valuation_needs_a_price_and_published_eps(quarterly) -> None:
     dividends = normalize_dividends(rows("finmind_dividend_2330.json"), "2330")
     prices = pd.DataFrame({"date": [date(2017, 3, 1)], "close": [180.0]})

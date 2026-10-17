@@ -149,28 +149,77 @@ def test_web_app_files_exist() -> None:
     assert "data/index.json" in (web / "app.js").read_text(encoding="utf-8")
 
 
-def test_export_attaches_the_backtest_reference(raw_config, write_config, tmp_path) -> None:
-    from datetime import datetime
+def _calibration(passed: bool) -> dict:
+    tiers = [50000, 300000, 1000000, 3000000]
+    stats = {
+        "n": 100,
+        "mean": 0.08,
+        "ci_low": 0.02,
+        "ci_high": 0.14,
+        "etf_mean": 0.06,
+        "rf_mean": 0.015,
+    }
+    period = {"months": 21, "score_range": [0, 100], "delisted_in_horizon": 0,
+              "tiers": {str(t): stats for t in tiers}}  # fmt: skip
+    return {
+        "passed": passed,
+        "gate": {
+            "passed": passed,
+            "reason": None if passed else "最高分組的樣本外報酬沒有高於最低分組",
+        },
+        "data_as_of": "2026-10-16",
+        "base_dates": {
+            "start": "2021-06-30",
+            "last": "2025-09-30",
+            "out_of_sample_start": "2024-01-31",
+        },
+        "horizon_months": 12,
+        "groups": 10,
+        "cutoffs": [10.0 * i for i in range(1, 10)],
+        "table": [{"group": g, "in_sample": period, "out_of_sample": period} for g in range(1, 11)],
+        "caps": {
+            str(t): {str(g): {"cap": None, "reason": None} for g in range(1, 11)} for t in tiers
+        },
+    }
 
-    from stock_research.backtest import score as bt
-    from tests.test_backtest import _run
 
+def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) -> None:
+    """The 0-100 score appears only once the calibration passed (spec v2 §4.2)."""
+    from stock_research.calibration.summary import save
+
+    metrics = tmp_path / "metric_walk_forward.json"
+    metrics.write_text(
+        json.dumps({"attempt": 1, "base_dates": ["2023-12-31", "2025-06-30"],
+                    "metrics": {"roe": {"positive": True}, "eps": {"positive": True}}}),
+        encoding="utf-8",
+    )  # fmt: skip
     raw_config["markets"]["tw"]["listing"]["overrides"] = [TSMC_LISTING]
     raw_config["app"]["watchlist"] = ["2330"]
-    raw_config["backtest"]["output"] = str(tmp_path / "bt.json")
+    raw_config["calibration"]["output"] = str(tmp_path / "calibration.json")
+    raw_config["research_score"]["consistency"]["walk_forward_results"] = str(metrics)
+    # The fixture history is too short for parts B-D; A and E (50 points) must be enough here.
+    raw_config["research_score"]["min_available_points"] = 40
     config = load_config(write_config(raw_config))
     md, _ = build_market_data(config)
-    export_site(md, config, tmp_path / "a")
-    detail = _read(tmp_path / "a" / "data" / "stocks" / "2330.json")
-    assert detail["backtest_reference"]["available"] is False
-    run = _run()
-    bt.save(run, bt.summarize(run, config, datetime(2026, 10, 17)), config.backtest.output)
+
+    export_site(md, config, tmp_path / "a")  # no calibration yet
+    research = _read(tmp_path / "a" / "data" / "stocks" / "2330.json")["research_score"]
+    assert research == {"available": False, "reason": "全市場歷史校準尚未完成，分數暫不顯示"}
+
+    save(_calibration(False), config.calibration.output)
     export_site(md, config, tmp_path / "b")
-    detail = _read(tmp_path / "b" / "data" / "stocks" / "2330.json")
-    ref = detail["backtest_reference"]
-    if detail["composite"]["V1"] is None:
-        assert ref["available"] is False
-    else:
-        assert ref["available"] and "倖存者偏差" in ref["disclaimer"]
-        index = _read(tmp_path / "b" / "data" / "index.json")
-        assert index["stocks"][0]["reference_label"] == ref["label"]
+    research = _read(tmp_path / "b" / "data" / "stocks" / "2330.json")["research_score"]
+    assert not research["available"] and "不上線" in research["reason"]
+
+    save(_calibration(True), config.calibration.output)
+    export_site(md, config, tmp_path / "c")
+    detail = _read(tmp_path / "c" / "data" / "stocks" / "2330.json")
+    research = detail["research_score"]
+    assert research["available"], research.get("reason")
+    assert [t["capital"] for t in research["tiers"]] == [50000, 300000, 1000000, 3000000]
+    assert all(0 <= t["score"] <= 100 and t["label"] for t in research["tiers"])
+    assert {p["name"] for p in research["parts"]} >= {"投資大師原則", "籌碼"}
+    assert "不構成投資建議" in research["disclaimer"]
+    row = _read(tmp_path / "c" / "data" / "index.json")["stocks"][0]
+    default = next(t for t in research["tiers"] if t["capital"] == 300000)
+    assert row["score"] == {"available": True, "value": default["score"], "label": default["label"]}

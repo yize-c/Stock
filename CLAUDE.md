@@ -15,7 +15,7 @@
 1. **數字由程式計算，LLM 只負責解讀。** LLM 不能自行產生股價、財務數字或比率。
 2. **Fail loudly**：資料沒抓到、過期或異常就明確報錯，不可靜默使用舊資料或預設值。
 3. LLM 的每個結論都要能追溯到來源，並由程式驗證引用真實存在。
-4. **不做無依據的股價預測**：不輸出目標價或漲跌斷言。例外（使用者 2026-10-17 修改規則）：「歷史回測參考」可依綜合分數區間顯示之後 3／6／12 個月的歷史超額報酬、勝率、樣本數、信賴區間，以及依 config 事先固定規則產生的「買進／持有／賣出參考」標示；只能由程式產生（LLM 不可），一律註明「歷史回測統計值，不代表未來，不構成投資建議」與倖存者偏差。
+4. **不做無依據的股價預測**：不輸出目標價或漲跌斷言。例外（使用者 2026-10-17 修改規則，v2 選 A）：0–100 分數與「強／中／觀察／弱」標示可依全市場歷史校準顯示該分數組之後 12 個月的歷史回測平均（扣成本）、信賴區間、樣本數，以及和 0050、定存的比較；只能由程式依 config 事先固定的規則產生（LLM 不可），用語一律寫「歷史回測平均」（不可寫預期、將會），並註明「不代表未來，不構成投資建議」；校準未通過門檻就不上線。
 5. 風險指標一律標註為「歷史統計值」，不是未來機率。
 6. **不偷看未來**：所有分析函式接受 `as_of`，只能看到 `available_date <= as_of` 的資料。
 7. 所有報告結尾附免責聲明：本工具僅供研究，不構成投資建議。
@@ -106,10 +106,13 @@
 - 每日匯出遇到 FinMind 額度用完（402）會等待後重試（`quota_retries`、`quota_wait_minutes`），互動指令不等待。
 - 資料檢查未通過的股票照樣列出並顯示失敗項目，不用舊資料替代；資料超過 `app.stale_after_hours` 未更新時 App 顯示警告。
 
-## 歷史回測參考（使用者 2026-10-17 修改規則）
-- `stock-research backtest`：2021-06-30 起每個月底以當時資料算 V1 綜合分數，比較之後 3／6／12 個月相對報酬指數的超額報酬，依分數區間統計平均、勝率、樣本數、區塊自助法信賴區間（區塊 = 股票 × 年度）。
-- 標示規則寫在 `config.yaml` 的 `backtest`，回測前 commit；修改要記在 `backtest/CHANGELOG.md`。結果存 `backtest/score_backtest.json`，每日匯出把對應區間附在每支股票上。
-- 標示只能由程式產生，必須附統計、倖存者偏差說明與「歷史回測統計值，不代表未來，不構成投資建議」。穩定性判定的 walk-forward 驗證仍不以股價為成功標準，兩者分開。
+## 0–100 分數（v2 第四節，第 3 階段）
+- 基本分（`research_score`，`analysis/research_score.py`）：A 投資大師原則 40（V1 綜合分數）、B 一致性 20（walk-forward 正向的指標中 V1／V3 一致的比例：全部 20、至少一半 10）、C 估值 15（交易所本益比、股價淨值比在自身 10 年的百分位）、D 風險 15（3 年波動度、最大回撤 ÷ 報酬指數）、E 籌碼 10（法人 20 日淨買超占成交量、融資使用率）。缺資料的項目不計、其餘換算成 100；可計算項目少於 70 分就不給分。
+- 本金級距 5 萬（3 檔）／30 萬（5 檔）／100 萬（10 檔）／300 萬（15 檔），預設顯示 30 萬；最終分數 = min(基本分 × 本金係數, 校準上限)。標示 ≥75 強、60–74 中、45–59 觀察、<45 弱。
+- 校準（`calibration`，`calibration/`，GitHub Actions `calibration.yml`，Secret `SECOND_FINMIND`）：2021-06～2025-09 每月底、全市場普通股含 2021-06 後下市者、每月保留成交金額前 50%、每月分 10 組、之後 12 個月報酬扣一次來回成本；2024-01 起為樣本外，對照表、上限、門檻只用樣本外。固定時鐘 `data_as_of` 讓多天的抓取共用快取。未做 Yahoo 交叉比對（Yahoo 沒有已下市股），其餘資料檢查照常。
+- 上市日推不出來時（2002～2005-09 開始交易的股票），改用證交所／櫃買 OpenAPI 的官方上市日（只在 GitHub 上連得到）。
+- 規則改動記在 `calibration/CHANGELOG.md`；先前未執行過的「歷史回測參考」（`backtest`）已由本校準取代並移除。
+- 全市場校準時穩定性報告約 3 秒（估值歷史只算一次 TTM 表，結果與原本完全相同）。
 
 ## v2（使用者 2026-10-17 的 v2 prompt 與決定）
 - 衝突處理選 **A**：允許依歷史回測的參考分數；本金調整由匯出程式預先算好各級距，JS 只切換顯示、不計算。
@@ -188,7 +191,8 @@ uv run stock-research config show        # 驗證並顯示 config
 uv run stock-research validate 2330      # 資料驗證 + 資料健康報告（需 FINMIND_TOKEN）
 uv run stock-research analyze 2330       # 完整分析報告 → reports/2330_<as_of>.md
 uv run stock-research breakpoints 2330   # 結構斷點掃描（僅供參考）
-uv run stock-research backtest           # 綜合分數歷史回測參考 → backtest/score_backtest.json
+uv run stock-research validation metric-walk-forward  # 逐指標 walk-forward（分數 B 項）
+uv run stock-research calibration fetch|liquidity|score|summarize  # 全市場校準（GitHub Actions）
 uv run stock-research validation run known-cases              # 已知案例測試
 uv run stock-research validation run walk-forward --phase dev # 開發期（每次都是一次調參嘗試）
 ```

@@ -21,13 +21,14 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+from stock_research.analysis import research_score as rs
 from stock_research.analysis.pipeline import FUNDAMENTALS, Analysis, AnalysisBlocked, run_analysis
 from stock_research.analysis.risk import RiskMetrics
 from stock_research.analysis.scoring import DISCLAIMER as SCORE_DISCLAIMER
 from stock_research.analysis.stability import Gap
 from stock_research.analysis.technicals import DISPUTED
 from stock_research.analysis.weighting import WeightedStat
-from stock_research.backtest.score import load_summary, reference_for
+from stock_research.calibration.summary import load as load_calibration
 from stock_research.config import AppConfig
 from stock_research.data.errors import DataValidationError
 from stock_research.data.market_data import MarketData
@@ -51,6 +52,7 @@ from stock_research.report.analysis import (
 )
 from stock_research.report.health import ATTRIBUTION, CHECK_NAMES, DISCLAIMER
 from stock_research.validation.aspects import aspect_verdicts
+from stock_research.validation.metric_walk_forward import positive_metrics
 
 SCHEMA_VERSION = 1
 WINDOW_KEYS = {WindowName.POST_2020: "V1", WindowName.PRE_2020: "V3", WindowName.FULL: "V2"}
@@ -194,8 +196,71 @@ def _frameworks(a: Analysis) -> list[dict[str, Any]]:
     return out
 
 
+def research_payload(
+    market_data: MarketData,
+    a: Analysis,
+    config: AppConfig,
+    calibration: dict[str, Any] | None,
+    positive: tuple[frozenset[str], str] | None,
+) -> dict[str, Any]:
+    """The 0-100 score per capital tier (spec v2 §4), only once the calibration passed."""
+    if calibration is None:
+        return {"available": False, "reason": "全市場歷史校準尚未完成，分數暫不顯示"}
+    if not calibration["passed"]:
+        reason = calibration["gate"].get("reason") or "未通過"
+        return {
+            "available": False,
+            "reason": f"分數未通過歷史校準門檻（{reason}），依規格不上線",
+        }
+    base = rs.score_stock(market_data, a.data, a.stability, config, positive)
+    if base.score is None:
+        return {"available": False, "reason": base.problem}
+    raw = a.data.prices.raw.dropna(subset=["close"])
+    price = float(raw["close"].iloc[-1])  # internal: positions and costs, never published
+    group = rs.group_of(base.score, calibration["cutoffs"])
+    history = calibration["table"][group - 1]["out_of_sample"]
+    tiers = rs.tier_scores(base, price, calibration, config)
+    return {
+        "available": True,
+        "default_capital": config.research_score.default_capital,
+        "base": base.score,
+        "group": group,
+        "groups": calibration["groups"],
+        "parts": [
+            {"name": p.name, "points": p.points, "max": p.max_points, "detail": p.detail}
+            for p in base.parts
+        ],
+        "tiers": [
+            {
+                "capital": t.capital,
+                "holdings": t.holdings,
+                "score": t.final,
+                "label": t.label,
+                "label_note": t.label_note,
+                "factor": t.factor,
+                "cost_ratio": t.cost_ratio,
+                "odd_lot": t.odd_lot,
+                "cap": t.cap,
+                "cap_reason": t.cap_reason,
+                "history": history["tiers"][str(t.capital)],
+            }
+            for t in tiers
+        ],
+        "calibration": {
+            "data_as_of": calibration["data_as_of"],
+            "out_of_sample": [
+                calibration["base_dates"]["out_of_sample_start"],
+                calibration["base_dates"]["last"],
+            ],
+            "horizon_months": calibration["horizon_months"],
+            "months": history["months"],
+        },
+        "disclaimer": rs.DISCLAIMER,
+    }
+
+
 def stock_payload(
-    a: Analysis, config: AppConfig, backtest: dict[str, Any] | None = None
+    a: Analysis, config: AppConfig, research: dict[str, Any] | None = None
 ) -> dict[str, Any]:
     st = a.stability
     names = {m.spec.key: _metric_name(m) for m in st.metrics}
@@ -224,9 +289,7 @@ def stock_payload(
                 "descriptions": list(a.technicals.descriptions) if a.technicals else [],
             },
             "health": _health(a.health),
-            "backtest_reference": reference_for(
-                st.composites[WindowName.POST_2020].score, backtest, config
-            ),
+            "research_score": research or {"available": False, "reason": "未計算"},
             "report_markdown": render_analysis(a, config),
             "disclaimer": [DISCLAIMER, SCORE_DISCLAIMER, ATTRIBUTION],
         }
@@ -258,7 +321,8 @@ def export_site(
 ) -> ExportSummary:
     as_of = market_data.today()
     summary = ExportSummary(as_of)
-    backtest = load_summary(config.backtest.output)
+    calibration = load_calibration(config.calibration.output)
+    positive = positive_metrics(config.research_score.consistency.walk_forward_results)
     rows = []
     for code in codes or config.app.watchlist:
         progress(f"{code}: analysing as of {as_of}")
@@ -303,7 +367,11 @@ def export_site(
             )
             rows.append(row)
             continue
-        payload = stock_payload(analysis, config, backtest)
+        try:
+            research = research_payload(market_data, analysis, config, calibration, positive)
+        except DataValidationError as exc:
+            research = {"available": False, "reason": f"分數無法計算：{exc}"}
+        payload = stock_payload(analysis, config, research)
         _write(out_dir / "data" / "stocks" / f"{code}.json", payload)
         summary.ok.append(code)
         rows.append(
@@ -315,7 +383,7 @@ def export_site(
                 "overall": payload["overall"],
                 "aspects": payload["aspects"],
                 "composite_v1": payload["composite"]["V1"],
-                "reference_label": payload["backtest_reference"].get("label"),
+                "score": _default_tier(payload["research_score"]),
             }
         )
     _write(
@@ -332,6 +400,14 @@ def export_site(
         ),
     )
     return summary
+
+
+def _default_tier(research: dict[str, Any]) -> dict[str, Any]:
+    """The list shows the default capital tier's score and label, or why there is none."""
+    if not research.get("available"):
+        return {"available": False, "reason": research.get("reason")}
+    tier = next(t for t in research["tiers"] if t["capital"] == research["default_capital"])
+    return {"available": True, "value": tier["score"], "label": tier["label"]}
 
 
 def _name(market_data: MarketData, code: str) -> str:

@@ -259,8 +259,15 @@ def valuation_snapshot(
     quarterly: pd.DataFrame,
     dividends: pd.DataFrame,
     basis: ShareBasis,
+    *,
+    unrestated_ttm: pd.DataFrame | None = None,
 ) -> Valuation:
-    """Single-date metrics using only figures published by ``on``, on ``on``'s share basis."""
+    """Single-date metrics using only figures published by ``on``, on ``on``'s share basis.
+
+    ``unrestated_ttm`` is ``ttm_table(quarterly, None, ...)`` computed once by a caller that
+    needs many dates; its rows published by ``on`` are exactly the TTM rows of the quarters
+    published by ``on``, and only the chosen row's EPS is restated to ``on``'s basis.
+    """
     traded = raw_prices.loc[raw_prices["close"].notna() & (raw_prices["date"] <= on)]
     if traded.empty:
         raise MissingDataError(ticker, "close", "none", f"a raw close on or before {on}")
@@ -268,17 +275,26 @@ def valuation_snapshot(
     price = float(price_row["close"])
 
     published = quarterly.loc[[a <= on for a in quarterly["available_date"]]]
-    ttm = ttm_table(published, basis, on)
-    if ttm.empty or pd.isna(ttm["eps"].iloc[-1]):
+    if unrestated_ttm is None:
+        rows = ttm_table(published, None, on)
+    else:
+        known = [a is not None and a <= on for a in unrestated_ttm["available_date"]]
+        rows = unrestated_ttm.loc[known] if len(unrestated_ttm) else unrestated_ttm
+    if rows.empty:
         raise MissingDataError(ticker, "eps_ttm", "none", f"four published quarters by {on}")
-    last = ttm.iloc[-1]
-
+    last = rows.iloc[-1]
     end = last["period_end"]
+    eps = basis.to_basis(published["eps"], pd.Series(published.index, index=published.index), on)
+    # The four quarters of the TTM row, restated to on's share basis.
+    quarters = [q for q in published.index if last["period_start"] <= q <= end]
+    eps_ttm = float(eps.loc[quarters].sum(min_count=4)) if len(quarters) == 4 else np.nan
+    if pd.isna(eps_ttm):
+        raise MissingDataError(ticker, "eps_ttm", "none", f"four published quarters by {on}")
+
     shares = last["ordinary_share_capital"] / basis.par_on(end) * basis.factor(end, on)
     bvps = last["parent_equity"] / shares if last["parent_equity"] > 0 and shares > 0 else np.nan
 
     year_ago = date(end.year - 1, end.month, end.day)  # quarter ends exist every year
-    eps = basis.to_basis(published["eps"], pd.Series(published.index, index=published.index), on)
     prior = eps.get(year_ago, np.nan)
     eps_yoy = eps[end] / prior - 1.0 if not pd.isna(prior) and prior > 0 else np.nan
 
@@ -291,10 +307,10 @@ def valuation_snapshot(
         on=on,
         price=price,
         price_date=price_row["date"],
-        eps_ttm=float(last["eps"]),
+        eps_ttm=eps_ttm,
         eps_period_end=end,
         book_value_per_share=bvps,
-        pe=price / last["eps"] if last["eps"] > 0 else np.nan,
+        pe=price / eps_ttm if eps_ttm > 0 else np.nan,
         pb=price / bvps if bvps > 0 else np.nan,
         dividend_yield=float(cash) / price,
         latest_quarter=end,

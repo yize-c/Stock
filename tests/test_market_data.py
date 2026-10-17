@@ -39,6 +39,12 @@ def base_routes() -> dict:
         ("TaiwanStockTradingDate", None): "finmind_trading_date_future.json",
         ("TaiwanStockTotalReturnIndex", "TAIEX"): "finmind_total_return_index_recent.json",
         ("TaiwanStockPrice", "2330"): "finmind_price_2330_recent.json",
+        ("TaiwanStockPER", "2330"): "finmind_per_2330_recent.json",
+        (
+            "TaiwanStockInstitutionalInvestorsBuySell",
+            "2330",
+        ): "finmind_institutional_2330_recent.json",
+        ("TaiwanStockMarginPurchaseShortSale", "2330"): "finmind_margin_2330_recent.json",
         ("TaiwanStockDividendResult", "2330"): "finmind_dividend_result_2330_recent.json",
         ("TaiwanStockCapitalReductionReferencePrice", "2330"): [],
         ("TaiwanStockSplitPrice", "2330"): [],
@@ -608,3 +614,30 @@ def test_build_inputs_end_to_end(make) -> None:
     for window_inputs in inputs.values():
         results = run_all(window_inputs)
         assert composite(results, config.scoring).window is window_inputs.window.name
+
+
+def test_listing_date_falls_back_to_the_official_one(make) -> None:
+    """A stock that began trading after the emerging board opened but before the valuation
+    series starts (4904: first trade 2003) gets the exchange's own listing date; without an
+    official source the derivation error stands."""
+    from types import SimpleNamespace
+
+    from stock_research.data.fetchers.twse import LISTED_COMPANIES, TwseFetcher
+    from stock_research.data.http import JsonClient, RateLimiter
+    from tests.fakes import RoutingSession
+
+    md, _ = make()
+    days = [date(2003, 8, 1), date(2003, 8, 4)]
+    md._finmind = SimpleNamespace(
+        prices=lambda code, start, end: pd.DataFrame({"date": days, "close": [10.0, 10.5]}),
+        valuation_dates=lambda code, start, end: [date(2005, 9, 2), date(2005, 9, 5)],
+    )
+    ticker = SimpleNamespace(code="4904")
+    with pytest.raises(MissingDataError, match="official listing date"):
+        md.listing_date(ticker)
+    routes = {LISTED_COMPANIES: "twse_t187ap03_L.json"}
+    md._twse = TwseFetcher(
+        JsonClient("twse", RoutingSession(routes), RateLimiter()), timedelta(hours=1)
+    )
+    md._memo = type(md._memo)()  # forget the official dates read without a TWSE source
+    assert md.listing_date(ticker) == date(2005, 8, 24)

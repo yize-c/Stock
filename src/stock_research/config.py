@@ -527,6 +527,8 @@ class FinMindConfig(_Model):
     history_start: date
     price_history_start: date
     valuation_coverage_start: date
+    # Institutional flows and margin balances are read from here (score part E).
+    chips_history_start: date
 
     @model_validator(mode="after")
     def _check_order(self) -> FinMindConfig:
@@ -730,26 +732,6 @@ class AppExportConfig(_Model):
 # --- backtest reference (user rule change 2026-10-17) ---------------------------------------
 
 
-class BacktestConfig(_Model):
-    output: Path
-    start: date
-    horizons_months: list[PositiveInt] = Field(min_length=1)
-    score_bins: list[Fraction] = Field(min_length=1)
-    label_horizon_months: PositiveInt
-    min_bucket_observations: PositiveInt
-    confidence: Annotated[float, Field(gt=0.5, lt=1.0)]
-    bootstrap_draws: PositiveInt
-    seed: int
-
-    @model_validator(mode="after")
-    def _consistent(self) -> BacktestConfig:
-        if self.score_bins != sorted(set(self.score_bins)):
-            raise ValueError("backtest.score_bins must be strictly increasing")
-        if self.label_horizon_months not in self.horizons_months:
-            raise ValueError("backtest.label_horizon_months must be one of horizons_months")
-        return self
-
-
 # --- trading costs (spec v2 §3) --------------------------------------------------------------
 
 
@@ -766,6 +748,146 @@ class CostsConfig(_Model):
 # --- root ---------------------------------------------------------------------------------
 
 
+class ScorePointsConfig(_Model):
+    """Points of each part of the 0-100 base score (spec v2 §4.1)."""
+
+    principles: PositiveInt  # A: investor-principle frameworks
+    consistency: PositiveInt  # B: V1/V3 agreement on walk-forward-positive metrics
+    valuation: PositiveInt  # C: P/E and P/B within the stock's own range
+    risk: PositiveInt  # D: volatility and drawdown against the benchmark
+    chips: PositiveInt  # E: institutional flows and margin use
+
+    @model_validator(mode="after")
+    def _check_total(self) -> ScorePointsConfig:
+        total = self.principles + self.consistency + self.valuation + self.risk + self.chips
+        if total != 100:
+            raise ValueError(f"score points must add up to 100, got {total}")
+        return self
+
+
+class ConsistencyScoreConfig(_Model):
+    walk_forward_results: Path
+    full_share: Fraction  # this share of counted metrics STABLE -> full points
+    partial_share: Fraction  # at least this share -> half points
+
+    @model_validator(mode="after")
+    def _check_order(self) -> ConsistencyScoreConfig:
+        if self.partial_share > self.full_share:
+            raise ValueError("consistency.partial_share must not exceed full_share")
+        return self
+
+
+class ValuationScoreConfig(_Model):
+    lookback_years: PositiveInt
+    min_years: PositiveFloat
+
+
+class RiskScoreConfig(_Model):
+    lookback_years: PositiveInt
+    min_trading_days: PositiveInt
+    ratio_full: PositiveFloat  # stock/benchmark at or below this: full points
+    ratio_zero: PositiveFloat  # at or above this: none
+
+    @model_validator(mode="after")
+    def _check_order(self) -> RiskScoreConfig:
+        if self.ratio_zero <= self.ratio_full:
+            raise ValueError("risk.ratio_zero must exceed ratio_full")
+        return self
+
+
+class ChipsScoreConfig(_Model):
+    lookback_trading_days: PositiveInt
+    investors: Annotated[list[str], Field(min_length=1)]
+    net_share_full: PositiveFloat  # net buying of this share of volume: full points
+    margin_usage_zero: Annotated[float, Field(gt=0.0, le=1.0)]
+
+
+class ScoreLabelConfig(_Model):
+    min_score: Annotated[float, Field(ge=0.0, le=100.0)]
+    name: str = Field(min_length=1)
+    note: str | None = None
+
+
+class CapitalTierConfig(_Model):
+    capital: PositiveInt
+    holdings: PositiveInt
+
+
+class CapitalFactorConfig(_Model):
+    cost_ratio_steps: Annotated[list[Fraction], Field(min_length=1)]
+    cost_step_penalty: Fraction
+    odd_lot_penalty: Fraction
+    concentration: Fraction  # one position above this share of capital is too concentrated
+    concentration_penalty: Fraction
+    floor: Fraction
+
+
+class ScoreCapsConfig(_Model):
+    below_risk_free: Annotated[float, Field(ge=0.0, le=100.0)]
+    below_etf: Annotated[float, Field(ge=0.0, le=100.0)]
+
+
+class ResearchScoreConfig(_Model):
+    """The 0-100 score of spec v2 §4 (base score, calibration caps, capital tiers, labels)."""
+
+    points: ScorePointsConfig
+    min_available_points: Annotated[int, Field(ge=1, le=100)]
+    consistency: ConsistencyScoreConfig
+    valuation: ValuationScoreConfig
+    risk: RiskScoreConfig
+    chips: ChipsScoreConfig
+    capital_tiers: Annotated[list[CapitalTierConfig], Field(min_length=1)]
+    default_capital: PositiveInt
+    capital_factor: CapitalFactorConfig
+    caps: ScoreCapsConfig
+    labels: Annotated[list[ScoreLabelConfig], Field(min_length=1)]
+
+    @model_validator(mode="after")
+    def _check(self) -> ResearchScoreConfig:
+        capitals = [t.capital for t in self.capital_tiers]
+        if capitals != sorted(set(capitals)):
+            raise ValueError("capital_tiers must be in increasing order of capital")
+        if self.default_capital not in capitals:
+            raise ValueError("default_capital must be one of the capital tiers")
+        floors = [label.min_score for label in self.labels]
+        if floors != sorted(floors, reverse=True) or floors[-1] != 0:
+            raise ValueError("labels must go from the highest min_score down to 0")
+        return self
+
+
+class CalibrationConfig(_Model):
+    """Full-market calibration of the base score (spec v2 §4.2)."""
+
+    output: Path
+    work_dir: Path  # per-stage parquet files (derived values only)
+    cache_dir: Path
+    cache_max_age_days: PositiveInt
+    # The run reads every source as of this fixed date, so runs on different days share the
+    # cache and give the same result.
+    data_as_of: date
+    start: date  # first month-end base date
+    last_base_date: date
+    horizon_months: PositiveInt
+    out_of_sample_start: date
+    liquidity_lookback_trading_days: PositiveInt
+    liquidity_keep_share: Fraction  # keep this share of the most traded stocks each month
+    groups: Annotated[int, Field(ge=2)]
+    min_rank_correlation: Annotated[float, Field(ge=-1.0, le=1.0)]
+    confidence: Fraction
+    bootstrap_draws: PositiveInt
+    seed: int
+    shards: PositiveInt
+    excluded_code_prefixes: list[str]
+
+    @model_validator(mode="after")
+    def _check_order(self) -> CalibrationConfig:
+        if not self.start < self.out_of_sample_start <= self.last_base_date:
+            raise ValueError("calibration needs start < out_of_sample_start <= last_base_date")
+        if add_months(self.last_base_date, self.horizon_months) > self.data_as_of:
+            raise ValueError("calibration.last_base_date + horizon must not pass data_as_of")
+        return self
+
+
 class AppConfig(_Model):
     general: GeneralConfig
     markets: MarketsConfig
@@ -780,8 +902,9 @@ class AppConfig(_Model):
     report: ReportConfig
     validation: ValidationConfig
     app: AppExportConfig
-    backtest: BacktestConfig
     costs: CostsConfig
+    research_score: ResearchScoreConfig
+    calibration: CalibrationConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:

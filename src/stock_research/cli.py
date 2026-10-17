@@ -227,31 +227,140 @@ def export(
         raise typer.Exit(code=1)
 
 
-@app.command("backtest")
-def backtest(
-    codes: list[str] | None = CodesArgumentApp,
+# --- calibration of the 0-100 score (spec v2 §4.2) -------------------------------------------
+
+calibration_app = typer.Typer(
+    help="Full-market calibration of the 0-100 score (runs on GitHub Actions).",
+    no_args_is_help=True,
+)
+app.add_typer(calibration_app, name="calibration")
+
+
+def _calibration_market(cfg: AppConfig) -> MarketData:
+    from stock_research.calibration.pipeline import calibration_market
+
+    try:
+        return calibration_market(cfg)
+    except MissingSecretError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+
+@calibration_app.command("fetch")
+def calibration_fetch(
+    minutes: float = typer.Option(320, "--minutes", help="Stop fetching after this long."),
     config: Path = ConfigOption,
 ) -> None:
-    """Backtest the V1 composite score against later excess returns (historical reference)."""
-    from stock_research.backtest.score import run_backtest, save, summarize
+    """Fill the calibration cache (resumable); write the liquidity screen when complete."""
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    from stock_research.calibration import pipeline
 
     cfg = _load(config)
-    market_data = _open(cfg, batch=True)
-    run = run_backtest(
-        market_data, cfg, codes=[c.strip() for c in codes] if codes else None, progress=_echo
+    market_data = _calibration_market(cfg)
+    deadline = datetime.now(UTC) + timedelta(minutes=minutes)
+    status = pipeline.fetch(market_data, cfg, deadline, progress=_echo)
+    work = cfg.calibration.work_dir
+    work.mkdir(parents=True, exist_ok=True)
+    if status["complete"]:
+        found = pipeline.universe(market_data, cfg)
+        pipeline.liquidity(market_data, cfg, found).to_parquet(
+            work / pipeline.LIQUIDITY_FILE, index=False
+        )
+    (work / pipeline.FETCH_STATUS_FILE).write_text(
+        json.dumps(status, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    summary = summarize(run, cfg, market_data.now)
-    save(run, summary, cfg.backtest.output)
-    typer.echo(f"data as of {summary['data_as_of']}; {summary['scored_rows']} scored rows")
-    for code, reason in run.excluded.items():
-        typer.echo(f"  excluded {code}: {reason}")
-    for b in summary["buckets"]:
-        parts = []
-        for months, st in b["horizons"].items():
-            mean = "—" if st["mean"] is None else f"{st['mean']:+.2%}"
-            parts.append(f"{months}m {mean} (n={st['n']})")
-        typer.echo(f"  [{b['low']:.0%}, {b['high']:.0%}) {b['label'] or '—'}: " + "; ".join(parts))
-    typer.echo(f"written: {cfg.backtest.output}")
+    typer.echo(json.dumps({k: v for k, v in status.items() if k != "failed"}))
+    for code, reason in status.get("failed", {}).items():
+        typer.echo(f"  failed {code}: {reason}")
+
+
+@calibration_app.command("liquidity")
+def calibration_liquidity(config: Path = ConfigOption) -> None:
+    """Rebuild the liquidity screen from the cache (prices only)."""
+    from stock_research.calibration import pipeline
+
+    cfg = _load(config)
+    market_data = _calibration_market(cfg)
+    found = pipeline.universe(market_data, cfg)
+    screen = pipeline.liquidity(market_data, cfg, found)
+    work = cfg.calibration.work_dir
+    work.mkdir(parents=True, exist_ok=True)
+    screen.to_parquet(work / pipeline.LIQUIDITY_FILE, index=False)
+    typer.echo(f"{len(found.codes)} codes, {int(screen['kept'].sum())} kept stock-months")
+
+
+@calibration_app.command("score")
+def calibration_score(
+    shard: int = typer.Option(..., "--shard", min=0),
+    shards: int = typer.Option(..., "--shards", min=1),
+    config: Path = ConfigOption,
+) -> None:
+    """Score one shard of the kept (stock, base date) pairs from the cache."""
+    import pandas as pd
+
+    from stock_research.calibration import pipeline
+
+    cfg = _load(config)
+    if shard >= shards:
+        typer.echo("--shard must be below --shards", err=True)
+        raise typer.Exit(code=2)
+    market_data = _calibration_market(cfg)
+    work = cfg.calibration.work_dir
+    screen = pd.read_parquet(work / pipeline.LIQUIDITY_FILE)
+    found = pipeline.universe(market_data, cfg)
+    rows = pipeline.score_shard(
+        market_data, cfg, screen.loc[screen["kept"]], found.delisted, shard, shards, progress=_echo
+    )
+    path = work / f"rows_{shard:02d}.parquet"
+    rows.to_parquet(path, index=False)
+    typer.echo(rows["status"].value_counts().to_string())
+    typer.echo(f"written: {path}")
+
+
+RowsDirOption = typer.Option(None, "--rows-dir", help="Folder with rows_*.parquet.")
+
+
+@calibration_app.command("summarize")
+def calibration_summarize(
+    rows_dir: Path | None = RowsDirOption,
+    config: Path = ConfigOption,
+) -> None:
+    """Score groups, caps and the gate from all shards; writes calibration.output."""
+    import pandas as pd
+
+    from stock_research.calibration import pipeline, summary
+
+    cfg = _load(config)
+    market_data = _calibration_market(cfg)
+    work = cfg.calibration.work_dir
+    files = sorted((rows_dir or work).glob("rows_*.parquet"))
+    if not files:
+        typer.echo("no rows_*.parquet found", err=True)
+        raise typer.Exit(code=1)
+    rows = pd.concat([pd.read_parquet(f) for f in files], ignore_index=True)
+    rows["base_date"] = pd.to_datetime(rows["base_date"]).dt.date
+    screen = pd.read_parquet(work / pipeline.LIQUIDITY_FILE)
+    found = pipeline.universe(market_data, cfg)
+    bench = summary.benchmarks(market_data, cfg, pipeline.base_dates(cfg.calibration))
+    result = summary.summarize(
+        rows,
+        screen,
+        bench,
+        cfg,
+        market_data.now,
+        extra={"universe_codes": len(found.codes), "delisted_codes": len(found.delisted)},
+    )
+    summary.save(result, cfg.calibration.output)
+    gate = result["gate"]
+    typer.echo(f"gate passed: {result['passed']} ({gate.get('reason') or 'ok'})")
+    tier = gate["tier"]
+    for entry in result["table"]:
+        oos = entry["out_of_sample"]["tiers"][tier]
+        mean = "—" if oos["mean"] is None else f"{oos['mean']:+.2%}"
+        typer.echo(f"  group {entry['group']:2d}: out-of-sample {mean} (n={oos['n']})")
+    typer.echo(f"written: {cfg.calibration.output}")
 
 
 # --- validation (spec §14) -------------------------------------------------------------------
@@ -388,6 +497,28 @@ def run_point_in_time_command(
             typer.echo(f"{code} {day}: " + ("OK" if not problems else "; ".join(problems)))
     if failed:
         raise typer.Exit(code=1)
+
+
+@validation_app.command("metric-walk-forward")
+def metric_walk_forward_command(config: Path = ConfigOption) -> None:
+    """Per-metric walk-forward result of the latest development attempt (score part B)."""
+    from datetime import UTC, datetime
+
+    import pandas as pd
+
+    from stock_research.validation import walk_forward as wf
+    from stock_research.validation.metric_walk_forward import evaluate_metrics, save
+
+    cfg = _load(config)
+    rows = pd.read_parquet(cfg.validation.directory / wf.PARQUET)
+    summary = evaluate_metrics(rows, cfg.validation.walk_forward)
+    path = cfg.research_score.consistency.walk_forward_results
+    save(summary, path, datetime.now(UTC))
+    for metric, result in summary["metrics"].items():
+        mark = "正向" if result["positive"] else "否"
+        auc_value, baseline = result["tool_auc"], result["baseline_b_quantile"]
+        typer.echo(f"{metric}: AUC {auc_value:.3f}，基準 B 95% {baseline:.3f}，{mark}")
+    typer.echo(f"written: {path}")
 
 
 @validation_app.command("forward-compare")

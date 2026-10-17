@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from functools import cached_property
 
 import numpy as np
 import pandas as pd
@@ -58,11 +59,13 @@ class ShareBasis:
             raise MissingDataError(
                 self.ticker, "share_basis", after.isoformat(), f"a date on or after {self.start}"
             )
-        days, values = self._arrays()
+        days, values = self._arrays
         lower = days >= after.toordinal() if include_start else days > after.toordinal()
         return float(np.prod(values[lower & (days <= through.toordinal())]))
 
+    @cached_property
     def _arrays(self) -> tuple[np.ndarray, np.ndarray]:
+        """Effective days (ordinals) and multipliers, built once per basis."""
         days = np.array([d.toordinal() for d in self.multipliers["effective_date"]], dtype=int)
         return days, self.multipliers["multiplier"].to_numpy(dtype=float)
 
@@ -83,10 +86,20 @@ class ShareBasis:
         Use ``include_start=True`` for dividends per share: a stock dividend paid on the same
         ex-date also enlarges the share count the cash dividend was paid on.
         """
-        factors = [
-            self.factor(pd.Timestamp(d).date(), basis, include_start=include_start) for d in days
-        ]
-        return values.astype(float) / np.array(factors)
+        dates = [pd.Timestamp(d).date() for d in days]
+        early = [d for d in dates if d < self.start]
+        if early:
+            self.factor(early[0], basis)  # raises: no basis before the start
+        ordinals = np.array([d.toordinal() for d in dates], dtype=int)
+        effective, multipliers = self._arrays
+        later = (
+            effective[None, :] >= ordinals[:, None]
+            if include_start
+            else (effective[None, :] > ordinals[:, None])
+        )
+        inside = later & (effective[None, :] <= basis.toordinal())
+        factors = np.prod(np.where(inside, multipliers[None, :], 1.0), axis=1)
+        return values.astype(float) / factors
 
 
 def share_basis(
