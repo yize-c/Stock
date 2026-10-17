@@ -61,23 +61,14 @@ def show(url: str, *, max_lines: int = 60, raw: int = 0) -> str:
 
 
 def closes() -> None:
-    print("##### official closes, March 2024 (second batch)")
-    status, _, text = fetch(
-        "https://www.twse.com.tw/rwd/zh/afterTrading/STOCK_DAY?date=20240301&stockNo=9921&response=json"
-    )
-    print(f"=== TWSE STOCK_DAY 9921 2024-03 -> {status}")
-    try:
-        for row in json.loads(text).get("data", [])[-12:]:
-            print("  ", row[0], "close", row[6])
-    except ValueError:
-        print("  ", text[:200])
+    print("##### official closes, 5347 September 2024")
     status, _, text = fetch(
         "https://www.tpex.org.tw/www/zh-tw/afterTrading/tradingStock"
-        "?code=5347&date=2024%2F03%2F01&response=json"
+        "?code=5347&date=2024%2F09%2F01&response=json"
     )
-    print(f"=== TPEx tradingStock 5347 2024-03 -> {status}")
+    print(f"=== TPEx tradingStock 5347 2024-09 -> {status}")
     try:
-        for row in json.loads(text)["tables"][0]["data"][-12:]:
+        for row in json.loads(text)["tables"][0]["data"]:
             print("  ", row[0], "close", row[6])
     except (ValueError, KeyError, IndexError):
         print("  ", text[:200])
@@ -102,57 +93,84 @@ def context(text: str, needle: str, width: int = 400, limit: int = 3) -> None:
         start = at + 1
 
 
+def browse(browser: urllib.request.OpenerDirector, url: str) -> str:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    try:
+        with browser.open(request, timeout=60) as response:
+            body = response.read().decode("utf-8", errors="replace")
+            print(f"=== {url} -> {response.status} {len(body)} chars")
+            return body
+    except urllib.error.HTTPError as exc:
+        print(f"=== {url} -> HTTP {exc.code}")
+    except Exception as exc:
+        print(f"=== {url} -> {type(exc).__name__}: {exc}")
+    return ""
+
+
+def terms(body: str, base: str, browser: urllib.request.OpenerDirector) -> None:
+    """Follow footer links that look like terms of use and print their reuse clauses."""
+    links = sorted(set(re.findall(r"""href=["']([^"'#]+)["'][^>]*>([^<]{0,30})<""", body)))
+    for link, label in links:
+        if re.search(r"條款|聲明|著作|版權|使用規範|term|copyright|disclaimer", link + label, re.I):
+            url = link if link.startswith("http") else base + "/" + link.lstrip("/")
+            print(f"  terms link: {label.strip()} -> {url}")
+            page = browse(browser, url)
+            text = " ".join(re.sub(r"<[^>]+>", " ", page).split())
+            for clause in re.findall(
+                r"[^。]{0,120}(?:轉載|重製|著作權|智慧財產|引用|散布)[^。]{0,160}。", text
+            )[:6]:
+                print("   |", clause)
+
+
 def etf_sources() -> None:
-    print("##### Yuanta 0050")
-    _, _, page = fetch("https://www.yuantaetfs.com/product/detail/0050/ratio")
-    context(page, "台積電")
-    for link in sorted(set(re.findall(r"""href=["']([^"']+)["']""", page))):
-        if re.search(r"term|law|privacy|statement|declare|copyright|聲明|條款", link, re.I):
-            print("  footer link:", link)
-    scripts = sorted(set(re.findall(r"""src=["'](/_nuxt/[^"']+\.js)["']""", page)))
-    apis: set[str] = set()
-    for src in scripts:
-        _, _, js = fetch("https://www.yuantaetfs.com" + src)
-        apis |= set(re.findall(r"""["'`](/?api/[A-Za-z0-9_/.-]{2,80})""", js))
-        apis |= set(
-            re.findall(r"""["'`](https?://[a-z0-9.-]*yuanta[a-z0-9.-]*/[^"'`\s]{0,80})""", js)
-        )
-    for api in sorted(apis):
-        print("  api:", api)
-
-    print("##### TWSE ETF e-tianfu 00981A")
-    _, _, js = fetch("https://www.twse.com.tw/rsrc/sites/etfortune/js/etf-product.js")
-    for api in sorted(set(re.findall(r"""["'`](/zh/ETFortune/[A-Za-z]+)""", js))):
-        print("  ajax:", api)
-
-    print("##### Uni-President (ezmoney) 00981A")
     browser = opener()
-    for url in (
-        "https://www.ezmoney.com.tw/",
-        "https://www.ezmoney.com.tw/ETF/Fund",
-        "https://www.ezmoney.com.tw/robots.txt",
+    print("##### Yuanta 0050 holdings table and terms")
+    page = browse(browser, "https://www.yuantaetfs.com/product/detail/0050/ratio")
+    cells = re.findall(r"<span data-v-818b5120>([^<]{1,40})</span>", page)
+    print("  first table cells:", cells[:24])
+    home = browse(browser, "https://www.yuantaetfs.com/")
+    terms(home + page, "https://www.yuantaetfs.com", browser)
+
+    print("##### Uni-President (ezmoney) fund pages")
+    found = None
+    for code in (
+        "36YTW",
+        "37YTW",
+        "44YTW",
+        "46YTW",
+        "47YTW",
+        "49YTW",
+        "50YTW",
+        "61YTW",
+        "63YTW",
+        "64YTW",
+        "65YTW",
     ):
-        try:
-            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-            with browser.open(request, timeout=60) as response:
-                body = response.read().decode("utf-8", errors="replace")
-                print(f"=== {url} -> {response.status} final={response.geturl()} {len(body)} chars")
-                title = re.search(r"<title>(.*?)</title>", body, re.S)
-                print("  title:", " ".join(title.group(1).split())[:200] if title else None)
-                found = set(
-                    re.findall(r"""href=["']([^"']*(?:00981A|fundCode|FundCode)[^"']*)""", body)
+        body = browse(browser, f"https://www.ezmoney.com.tw/ETF/Fund/Info?fundCode={code}")
+        title = re.search(r"<title>(.*?)</title>", body, re.S)
+        has = "00981A" in body
+        name = " ".join(title.group(1).split())[:80] if title else None
+        print(f"  {code}: 00981A={has} title={name}")
+        if has and found is None:
+            found = (code, body)
+    if found:
+        code, body = found
+        print(f"##### 00981A page {code}")
+        for api in sorted(
+            set(
+                re.findall(
+                    r"""["'](/[A-Za-z]+/[A-Za-z/]*(?:Asset|Hold|Stock|Portfolio|PCF|Pcf|Weight)[A-Za-z/]*)["']""",
+                    body,
                 )
-                for link in sorted(found)[:20]:
-                    print("  link:", link)
-                for link in sorted(set(re.findall(r"""href=["']([^"']+)["']""", body))):
-                    if re.search(r"term|privacy|statement|copyright|聲明|條款", link, re.I):
-                        print("  footer link:", link)
-                if url.endswith("robots.txt"):
-                    print(body[:500])
-        except urllib.error.HTTPError as exc:
-            print(f"=== {url} -> HTTP {exc.code} location={exc.headers.get('Location')}")
-        except Exception as exc:
-            print(f"=== {url} -> {type(exc).__name__}: {exc}")
+            )
+        ):
+            print("  api:", api)
+        text = " ".join(re.sub(r"<[^>]+>", " ", body).split())
+        for kw in ("持股", "投資組合", "申購買回", "PCF", "權重"):
+            at = text.find(kw)
+            if at >= 0:
+                print(f"  {kw}:", text[max(0, at - 80) : at + 200])
+        terms(body, "https://www.ezmoney.com.tw", browser)
 
 
 def main() -> int:
