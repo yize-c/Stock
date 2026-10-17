@@ -21,6 +21,9 @@
   sample is ``robustness.overfit_ratio`` times (or more) the out-of-sample spread, or the
   in-sample spread is positive and the out-of-sample one is not. It only warns.
 
+* Investor preferences (成長 × 風險 §1.4): every step above runs once per preference on that
+  preference's base score; the top-level fields repeat the default preference's.
+
 Historical statistics only; not forecasts and not investment advice.
 """
 
@@ -41,7 +44,7 @@ from stock_research.data.errors import DataValidationError
 from stock_research.data.market_data import MarketData
 from stock_research.validation.statistics import block_bootstrap, overfit_check
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2  # 2: one calibration per investor preference
 DISCLAIMER = (
     "歷史回測平均（扣交易成本），不代表未來，不構成投資建議。本工具僅供研究，不構成投資建議。"
 )
@@ -102,6 +105,10 @@ def _stats(values: np.ndarray, blocks: np.ndarray, config: AppConfig, rng) -> di
     }
 
 
+class RowsError(Exception):
+    """The score rows do not match the score definition in config.yaml."""
+
+
 def summarize(
     rows: pd.DataFrame,
     liquidity: pd.DataFrame,
@@ -110,6 +117,64 @@ def summarize(
     now: datetime,
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    settings = config.calibration
+    preferences = config.research_score.preferences
+    missing = [k for k in preferences.options if f"score_{k}" not in rows]
+    if missing:
+        raise RowsError(
+            f"rows have no score for preference(s) {missing}: they were scored with an older "
+            "score definition; run the score stage again"
+        )
+    per = {
+        key: _calibrate(rows.assign(score=rows[f"score_{key}"]), bench, config)
+        for key in preferences.options
+    }
+    default = per[preferences.default]
+    status_counts = rows["status"].value_counts().to_dict()
+    return {
+        "schema": SCHEMA_VERSION,
+        "generated_at": now.isoformat(timespec="seconds"),
+        "data_as_of": settings.data_as_of.isoformat(),
+        "base_dates": {
+            "start": settings.start.isoformat(),
+            "last": settings.last_base_date.isoformat(),
+            "out_of_sample_start": settings.out_of_sample_start.isoformat(),
+        },
+        "horizon_months": settings.horizon_months,
+        "groups": settings.groups,
+        "universe": {
+            "liquid_rows": int(liquidity["kept"].sum()),
+            "screened_rows": int(len(liquidity)),
+            "stocks": int(liquidity["code"].nunique()),
+            "status_counts": {str(k): int(v) for k, v in status_counts.items()},
+            "scored_rows": default["scored_rows"],
+            "with_outcome": default["with_outcome"],
+            **(extra or {}),
+        },
+        "default_preference": preferences.default,
+        **{k: default[k] for k in ("passed", "gate", "overfit", "cutoffs", "table", "caps")},
+        "preferences": per,
+        "limitations": [
+            "未做 FinMind 與 Yahoo 的收盤價交叉比對（Yahoo 沒有已下市股票）；其餘資料檢查照常。",
+            "B 項採用哪些指標，依 walk-forward 開發期（2023-12～2025-06）決定，與樣本外期間重疊。",
+            "在持有期間內下市的股票以最後收盤價計算，未計入清算或其他回收金額。",
+            "流動性篩選依當月前 60 個交易日的平均成交金額，只保留前半。",
+        ],
+        "disclaimer": DISCLAIMER,
+    }
+
+
+def for_preference(calibration: dict[str, Any], key: str) -> dict[str, Any] | None:
+    """One preference's calibration (passed, gate, cutoffs, table, caps, overfit) with the
+    shared fields; None when the file has none for it (an older calibration)."""
+    entry = (calibration.get("preferences") or {}).get(key)
+    if entry is None:
+        return None
+    return {**calibration, **entry}
+
+
+def _calibrate(rows: pd.DataFrame, bench: pd.DataFrame, config: AppConfig) -> dict[str, Any]:
+    """Groups, table, caps, gate and cutoffs for the base score in ``rows["score"]``."""
     settings = config.calibration
     score_settings = config.research_score
     rng = np.random.default_rng(settings.seed)
@@ -178,40 +243,15 @@ def summarize(
     quantiles = np.arange(1, settings.groups) / settings.groups
     monthly = oos.groupby("base_date")["score"].quantile(quantiles).unstack()
     cutoffs = [float(v) for v in monthly.median(axis=0)] if len(monthly) else []
-    status_counts = rows["status"].value_counts().to_dict()
     return {
-        "schema": SCHEMA_VERSION,
-        "generated_at": now.isoformat(timespec="seconds"),
-        "data_as_of": settings.data_as_of.isoformat(),
-        "base_dates": {
-            "start": settings.start.isoformat(),
-            "last": settings.last_base_date.isoformat(),
-            "out_of_sample_start": settings.out_of_sample_start.isoformat(),
-        },
-        "horizon_months": settings.horizon_months,
-        "groups": settings.groups,
-        "universe": {
-            "liquid_rows": int(liquidity["kept"].sum()),
-            "screened_rows": int(len(liquidity)),
-            "stocks": int(liquidity["code"].nunique()),
-            "status_counts": {str(k): int(v) for k, v in status_counts.items()},
-            "scored_rows": int(len(scored)),
-            "with_outcome": int(scored["gross"].notna().sum()),
-            **(extra or {}),
-        },
         "passed": gate["passed"],
         "gate": gate,
         "overfit": overfit,
         "cutoffs": cutoffs,
         "table": table,
         "caps": caps,
-        "limitations": [
-            "未做 FinMind 與 Yahoo 的收盤價交叉比對（Yahoo 沒有已下市股票）；其餘資料檢查照常。",
-            "B 項採用哪些指標，依 walk-forward 開發期（2023-12～2025-06）決定，與樣本外期間重疊。",
-            "在持有期間內下市的股票以最後收盤價計算，未計入清算或其他回收金額。",
-            "流動性篩選依當月前 60 個交易日的平均成交金額，只保留前半。",
-        ],
-        "disclaimer": DISCLAIMER,
+        "scored_rows": int(len(scored)),
+        "with_outcome": int(scored["gross"].notna().sum()),
     }
 
 

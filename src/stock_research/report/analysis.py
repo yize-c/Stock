@@ -171,8 +171,11 @@ def _growth_value(item) -> str:
 
 def _growth_risk(a: Analysis) -> list[str]:
     """成長 × 風險: the last few years' actual growth (not a forecast)."""
-    g = a.growth
+    g, r, q = a.growth_risk.growth, a.growth_risk.risk, a.growth_risk.quadrant
     lines = [f"### 成長與風險（最近 {g.years} 年）", ""]
+    if q is not None:
+        preferred = "（資深股民偏好的組合）" if q.preferred else ""
+        lines += [f"- 象限：**{q.label}**{preferred}", ""]
     score = f"{g.score:.0f}／100" if g.score is not None else f"無法計算（{g.problem}）"
     lines += [f"- 成長分數：{score}。{g.note}", ""]
     rows = [
@@ -185,7 +188,6 @@ def _growth_risk(a: Analysis) -> list[str]:
         for item in g.items
     ]
     lines += table(["項目", "數值", "得分（0-100）", "計算期間與說明"], rows) + [""]
-    r = a.risk_rating
     score = (
         f"{r.score:.0f}／100（越高越危險）" if r.score is not None else f"無法計算（{r.problem}）"
     )

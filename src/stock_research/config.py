@@ -749,19 +749,37 @@ class CostsConfig(_Model):
 
 
 class ScorePointsConfig(_Model):
-    """Points of each part of the 0-100 base score (spec v2 §4.1)."""
+    """Points per part (成長 × 風險, user's plan 1): the growth and risk points are split
+    between growth and safety (100 - risk score) by the investor preference."""
 
-    principles: PositiveInt  # A: investor-principle frameworks
-    consistency: PositiveInt  # B: V1/V3 agreement on walk-forward-positive metrics
-    valuation: PositiveInt  # C: P/E and P/B within the stock's own range
-    risk: PositiveInt  # D: volatility and drawdown against the benchmark
-    chips: PositiveInt  # E: institutional flows and margin use
+    principles: NonNegativeInt
+    consistency: NonNegativeInt
+    growth_risk: NonNegativeInt
+    chips: NonNegativeInt
 
     @model_validator(mode="after")
     def _check_total(self) -> ScorePointsConfig:
-        total = self.principles + self.consistency + self.valuation + self.risk + self.chips
+        total = self.principles + self.consistency + self.growth_risk + self.chips
         if total != 100:
             raise ValueError(f"score points must add up to 100, got {total}")
+        return self
+
+
+class PreferenceConfig(_Model):
+    label: str = Field(min_length=1)
+    growth_share: Fraction  # of points.growth_risk; the rest weighs safety (low risk)
+
+
+class PreferencesConfig(_Model):
+    """Investor preference (成長 × 風險 §1.4): only the growth / safety weights change."""
+
+    default: str
+    options: dict[str, PreferenceConfig]
+
+    @model_validator(mode="after")
+    def _check(self) -> PreferencesConfig:
+        if self.default not in self.options:
+            raise ValueError("preferences.default must be one of the options")
         return self
 
 
@@ -780,19 +798,6 @@ class ConsistencyScoreConfig(_Model):
 class ValuationScoreConfig(_Model):
     lookback_years: PositiveInt
     min_years: PositiveFloat
-
-
-class RiskScoreConfig(_Model):
-    lookback_years: PositiveInt
-    min_trading_days: PositiveInt
-    ratio_full: PositiveFloat  # stock/benchmark at or below this: full points
-    ratio_zero: PositiveFloat  # at or above this: none
-
-    @model_validator(mode="after")
-    def _check_order(self) -> RiskScoreConfig:
-        if self.ratio_zero <= self.ratio_full:
-            raise ValueError("risk.ratio_zero must exceed ratio_full")
-        return self
 
 
 class ChipsScoreConfig(_Model):
@@ -839,8 +844,8 @@ class ResearchScoreConfig(_Model):
     max_chips_share: Fraction
     min_available_points: Annotated[int, Field(ge=1, le=100)]
     consistency: ConsistencyScoreConfig
-    valuation: ValuationScoreConfig
-    risk: RiskScoreConfig
+    preferences: PreferencesConfig
+    valuation: ValuationScoreConfig  # the P/E-P/B percentile of the risk score's overheating
     chips: ChipsScoreConfig
     capital_tiers: Annotated[list[CapitalTierConfig], Field(min_length=1)]
     default_capital: PositiveInt
@@ -1006,6 +1011,24 @@ class RiskRatingConfig(_Model):
     stability: StabilityDangerConfig
 
 
+class QuadrantConfig(_Model):
+    """Growth x risk quadrants (成長 × 風險 §1.3)."""
+
+    growth_high: Annotated[float, Field(ge=0.0, le=100.0)]  # growth score at or above: 高成長
+    growth_mid: Annotated[float, Field(ge=0.0, le=100.0)]  # at or above: 中成長, below: 低成長
+    risk_high: Annotated[float, Field(ge=0.0, le=100.0)]  # risk score at or above: 高風險
+    preferred: str  # the senior investor's preferred quadrant key, e.g. "mid_low"
+
+    @model_validator(mode="after")
+    def _check(self) -> QuadrantConfig:
+        if self.growth_mid >= self.growth_high:
+            raise ValueError("quadrant.growth_mid must be below growth_high")
+        keys = {f"{g}_{r}" for g in ("high", "mid", "low") for r in ("low", "high")}
+        if self.preferred not in keys:
+            raise ValueError(f"quadrant.preferred must be one of {sorted(keys)}")
+        return self
+
+
 class RobustnessConfig(_Model):
     """Spec v2 P1: half-life sensitivity and the overfitting warning."""
 
@@ -1048,6 +1071,7 @@ class AppConfig(_Model):
     portfolio: PortfolioConfig
     growth: GrowthConfig
     risk_rating: RiskRatingConfig
+    quadrant: QuadrantConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:

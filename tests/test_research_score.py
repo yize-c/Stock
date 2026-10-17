@@ -64,39 +64,47 @@ def test_consistency_counts_only_walk_forward_positive_metrics() -> None:
     )
 
 
-def test_valuation_part_uses_the_stocks_own_percentiles() -> None:
+def test_valuation_position_uses_the_stocks_own_percentiles() -> None:
     days = [d.date() for d in pd.bdate_range("2019-01-01", AS_OF)]
     pe = np.linspace(10, 30, len(days))
     pe[-1] = 10.0  # the cheapest P/E in the window
     frame = pd.DataFrame({"date": days, "pe": pe, "pb": np.full(len(days), np.nan)})
     frame.loc[len(frame) - 1, "pb"] = 2.0
     frame["pb"] = frame["pb"].fillna(3.0)  # every earlier P/B is higher
-    part = rs.valuation_part(frame, AS_OF, None, SETTINGS.valuation, 15)
-    assert part.points == pytest.approx(15 * (1 - np.mean([2 / len(days), 1 / len(days)])))
-    assert "百分位" in part.detail
+    position = rs.valuation_position(frame, AS_OF, None, SETTINGS.valuation)
+    assert position.percentiles == {
+        "pe": pytest.approx(2 / len(days)),
+        "pb": pytest.approx(1 / len(days)),
+    }
+    assert "百分位" in position.notes[0]
     # The listing date cuts the history: too short.
-    short = rs.valuation_part(frame, AS_OF, AS_OF - timedelta(days=365), SETTINGS.valuation, 15)
-    assert short.points is None
-    loss = frame.assign(pe=np.nan)
-    assert rs.valuation_part(loss, AS_OF, None, SETTINGS.valuation, 15).points is not None
+    short = rs.valuation_position(frame, AS_OF, AS_OF - timedelta(days=365), SETTINGS.valuation)
+    assert short.problem is not None and not short.percentiles
+    loss = rs.valuation_position(frame.assign(pe=np.nan), AS_OF, None, SETTINGS.valuation)
+    assert set(loss.percentiles) == {"pb"} and "虧損" in loss.notes[0]
 
 
-def _series(column: str, returns: np.ndarray) -> pd.DataFrame:
-    return pd.DataFrame({"date": DAYS, column: 100 * np.cumprod(1 + returns)})
+def test_growth_and_safety_parts_from_the_two_scores() -> None:
+    growth = SimpleNamespace(score=60.0, problem=None)
+    risk = SimpleNamespace(score=70.0, problem=None)
+    assert rs.growth_part(growth, 15).points == pytest.approx(9.0)
+    assert rs.safety_part(risk, 25).points == pytest.approx(7.5)  # 25 x (100 - 70) / 100
+    missing = SimpleNamespace(score=None, problem="沒有資料")
+    assert rs.growth_part(missing, 15).points is None
+    assert rs.safety_part(missing, 25).detail == "沒有資料"
 
 
-def test_risk_part_compares_with_the_benchmark() -> None:
-    rng = np.random.default_rng(1)
-    base = rng.normal(0, 0.01, len(DAYS))
-    index = _series("total_return_index", base)
-    same = rs.risk_part(_series("adj_close", base), index, AS_OF, SETTINGS.risk, 15)
-    assert same.points == pytest.approx(15.0) and "1.00 倍" in same.detail
-    double = rs.risk_part(_series("adj_close", 2 * base), index, AS_OF, SETTINGS.risk, 15)
-    assert 0 < double.points < 15  # twice the volatility: half of the (1, 3) range
-    vol = float(double.detail.split("波動度為大盤的 ")[1].split(" 倍")[0])
-    assert vol == pytest.approx(2.0, abs=0.01)
-    few = rs.risk_part(_series("adj_close", base).tail(100), index, AS_OF, SETTINGS.risk, 15)
-    assert few.points is None
+def test_preferences_only_move_points_between_growth_and_safety() -> None:
+    """成長 × 風險 §1.4: every preference shares all other parts and the raw scores."""
+    preferences = SETTINGS.preferences
+    points = SETTINGS.points
+    assert points.principles + points.consistency + points.growth_risk + points.chips == 100
+    splits = {
+        key: (points.growth_risk * o.growth_share, points.growth_risk * (1 - o.growth_share))
+        for key, o in preferences.options.items()
+    }
+    assert splits == {"conservative": (15, 25), "balanced": (20, 20), "aggressive": (25, 15)}
+    assert preferences.default == "conservative"  # the senior investor's preference
 
 
 def test_chips_part_from_streak_trust_holdings_and_margin() -> None:
@@ -150,22 +158,23 @@ def test_shares_outstanding_uses_the_latest_published_statement() -> None:
 def test_chips_weight_is_capped(raw_config) -> None:
     from stock_research.config import AppConfig
 
-    raw_config["research_score"]["points"].update(chips=20, principles=30)
+    raw_config["research_score"]["points"].update(chips=20, principles=20)
     with pytest.raises(ValueError, match="15%"):
         AppConfig.model_validate(raw_config)
 
 
 def test_base_score_scales_available_parts_and_needs_enough_of_them() -> None:
     parts = [
-        rs.ScorePart("principles", 40, 30.0, ""),
+        rs.ScorePart("principles", 30, 20.0, ""),
         rs.ScorePart("consistency", 20, 10.0, ""),
-        rs.ScorePart("valuation", 15, 7.5, ""),
-        rs.ScorePart("risk", 15, 15.0, ""),
+        rs.ScorePart("growth", 15, 7.5, ""),
+        rs.ScorePart("safety", 25, 25.0, ""),
         rs.ScorePart("chips", 10, None, "沒有資料"),
     ]
     score = rs.base_score(AS_OF, parts, SETTINGS)
     assert score.score == pytest.approx(100 * 62.5 / 90)
-    parts[0] = rs.ScorePart("principles", 40, None, "N/A")
+    parts[0] = rs.ScorePart("principles", 30, None, "N/A")
+    parts[1] = rs.ScorePart("consistency", 20, None, "N/A")
     missing = rs.base_score(AS_OF, parts, SETTINGS)
     assert missing.score is None and "投資大師原則" in missing.problem
 

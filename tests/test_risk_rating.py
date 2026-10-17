@@ -146,3 +146,13 @@ def test_overheating_must_weigh_the_most(raw_config, write_config) -> None:
     raw_config["risk_rating"]["weights"]["drawdown"] = 0.35
     with pytest.raises(ConfigError, match="overheat must be the largest"):
         load_config(write_config(raw_config))
+
+
+def test_quadrants_follow_the_configured_bounds() -> None:
+    from stock_research.analysis.growth_risk import quadrant
+
+    q = CONFIG.quadrant
+    assert quadrant(50, 30, q).label == "中成長・低風險" and quadrant(50, 30, q).preferred
+    assert quadrant(67, 50, q).key == "high_high"  # bounds belong to the upper level
+    assert quadrant(10, 80, q).label == "低成長・高風險" and not quadrant(10, 80, q).preferred
+    assert quadrant(None, 30, q) is None and quadrant(50, None, q) is None

@@ -369,15 +369,16 @@ def calibration_summarize(
         extra={"universe_codes": len(found.codes), "delisted_codes": len(found.delisted)},
     )
     summary.save(result, cfg.calibration.output)
-    gate = result["gate"]
-    typer.echo(f"gate passed: {result['passed']} ({gate.get('reason') or 'ok'})")
-    if result["overfit"]["warning"]:
-        typer.echo(f"overfitting warning: {result['overfit']['message']}")
-    tier = gate["tier"]
-    for entry in result["table"]:
-        oos = entry["out_of_sample"]["tiers"][tier]
-        mean = "—" if oos["mean"] is None else f"{oos['mean']:+.2%}"
-        typer.echo(f"  group {entry['group']:2d}: out-of-sample {mean} (n={oos['n']})")
+    for key, per in result["preferences"].items():
+        gate = per["gate"]
+        typer.echo(f"[{key}] gate passed: {per['passed']} ({gate.get('reason') or 'ok'})")
+        if per["overfit"]["warning"]:
+            typer.echo(f"[{key}] overfitting warning: {per['overfit']['message']}")
+        tier = gate["tier"]
+        for entry in per["table"]:
+            oos = entry["out_of_sample"]["tiers"][tier]
+            mean = "—" if oos["mean"] is None else f"{oos['mean']:+.2%}"
+            typer.echo(f"  group {entry['group']:2d}: out-of-sample {mean} (n={oos['n']})")
     typer.echo(f"written: {cfg.calibration.output}")
 
 
