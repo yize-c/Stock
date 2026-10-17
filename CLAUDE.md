@@ -119,11 +119,13 @@
 - 交易成本：`costs`（手續費 0.1425% 雙邊、最低 20 元、證交稅股票 0.3%／ETF 0.1% 賣出），`analysis/costs.py`；報酬比較一律扣一次來回成本（參考部位 `costs.reference_position`）。
 - 0050：`markets.tw.benchmark.compare_etf`，還原並扣 ETF 來回成本，與加權報酬指數、一年期定存並列（`analysis/returns.py`）。
 - push：探測腳本（`scripts/probe_*.py` 與探測流程）可直接 push 到工作分支；其他 push 先問使用者。
-- token（使用者決定）：雲端容器沒有 `.env`，本機用雲端環境設定的環境變數、GitHub Actions 用 Secret；不印出、不寫進檔案或 commit。全市場校準用使用者另外申請的第二個免費 token（GitHub Secret）。
+- token（使用者決定）：雲端容器沒有 `.env`，本機用雲端環境設定的環境變數、GitHub Actions 用 Secret；不印出、不寫進檔案或 commit。全市場校準用使用者另外申請的第二個免費 token（GitHub Secret `SECOND_FINMIND`），每日匯出仍用 `FINMIND_TOKEN`。
 - 公開網站（使用者決定，FinMind 條款：不可轉發原始資料、需標註 FinMind）：只放程式計算的結果（不放收盤價、金額等原始數字），網頁與報告附資料來源標註（`report/health.py` 的 `ATTRIBUTION`）。
 - 跨來源比對（walk-forward 69 次失敗的原因，使用者要求調查）：(1) 過去的 `as_of` 比對時，Yahoo 收盤已用今天以前的全部分割回溯調整 → 讀到今天並用 Yahoo 的分割倍數還原；(2) Yahoo 個別日期錯誤（多在 2024-03-29）→ 經證交所STOCK_DAY／櫃買 tradingStock 官方收盤確認後列入 `markets.tw.data_validation.known_source_errors`，該日不比對且 FinMind 必須等於官方收盤；清單外仍報錯。修正後 69 次全部通過。
 - 分數 B 項「walk-forward 正向」（使用者選 b）：以指標層級計算——該指標的 walk-forward AUC 高於隨機基準時，該指標的 V1／V3 一致才算數；目前只有開發期資料，需註明為樣本內結果。
 - ETF 資料來源（使用者：不用錢、不違法即可）：FinMind 主動式 ETF 持股需 Sponsor 付費、沒有指數型 ETF 成分股；元大官網 0050 持股頁公開列出股數與權重（使用條款未找到）；統一投信（00981A）條款禁止未經同意轉載；證交所 e添富需書面同意（開放資料平臺除外）。持股原始資料不可放上公開網站。
+- ETF 透視分數（使用者選 b）：持股只用來計算，網站只放算出的透視分數與覆蓋率，不放持股明細或權重。
+- PR（使用者 2026-10-17）：這批改動（v2 第 2 階段、網站、跨來源與央行利率）驗證完成後可自行開 PR 並 merge。
 
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |
