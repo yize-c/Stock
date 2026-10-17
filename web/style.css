@@ -87,3 +87,7 @@ td.num { white-space: nowrap; }
 ul.list > li { display: flex; align-items: center; gap: 4px; }
 ul.list > li > .row { flex: 1; min-width: 0; }
 td:first-child, th:first-child { min-width: 7.5em; }
+.minis { display: flex; gap: 4px; justify-content: flex-end; }
+.mini { border-radius: 6px; padding: 1px 5px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.minis { justify-content: flex-start; margin-top: 4px; }
+.big-score { font-size: 18px; font-weight: 700; }

@@ -12,9 +12,8 @@ const VERDICTS = {
 const FILTERS = [
   ["all", "全部"],
   ["fav", "★ 自選"],
-  ["UNSTABLE", VERDICTS.UNSTABLE],
-  ["REGIME_SHIFT", VERDICTS.REGIME_SHIFT],
-  ["STABLE", VERDICTS.STABLE],
+  ["calm", "三面向都沒有⚠️"],
+  ["unstable", "有面向⚠️不穩定"],
   ["problem", "資料檢查未過"],
 ];
 const WINDOWS = ["V1", "V3", "V2"];
@@ -23,6 +22,7 @@ const LEGEND = [
   "比較 2020 年以後（V1）與以前（V3）；V2 全期只當參考。",
   "✅ 穩定：前後一致。🔄 結構轉變：2020 後換了樣子，但新樣子本身穩定。",
   "⚠️ 不穩定：一直在變，歷史數字參考價值低。❔ 資料不足：無法判斷。",
+  "整體判定取所有項目（含框架條件）中最差的一個，所以多半是不穩定；列表改看營收、獲利、風險三個面向。",
   "綜合分數只描述符合投資人原則的程度，不是買賣建議。",
 ];
 
@@ -98,8 +98,28 @@ function matches(stock) {
     case "all": return true;
     case "fav": return state.favs.has(stock.code);
     case "problem": return stock.status !== "ok";
-    default: return stock.status === "ok" && stock.overall.code === state.filter;
+    case "calm":
+      return stock.status === "ok" && aspectCodes(stock).every((c) => c !== "UNSTABLE");
+    case "unstable":
+      return stock.status === "ok" && aspectCodes(stock).includes("UNSTABLE");
+    default: return true;
   }
+}
+
+// The overall verdict is the worst of dozens of items and is UNSTABLE for nearly every stock,
+// so the list shows the three aspects (revenue, profitability, risk) instead.
+const ASPECT_SHORT = { revenue: "營收", profitability: "獲利", risk: "風險" };
+const ICON = { STABLE: "✅", REGIME_SHIFT: "🔄", UNSTABLE: "⚠️", INSUFFICIENT: "❔" };
+function aspectCodes(stock) {
+  return Object.values(stock.aspects).map((a) => a.code);
+}
+function aspectMini(stock) {
+  return Object.entries(ASPECT_SHORT)
+    .map(([key, label]) => {
+      const code = stock.aspects[key].code;
+      return `<span class="mini v-${esc(code)}" title="${esc(label)}：${esc(VERDICTS[code])}">${label}${ICON[code]}</span>`;
+    })
+    .join("");
 }
 
 function rowHTML(stock) {
@@ -113,8 +133,9 @@ function rowHTML(stock) {
   }
   return `<li><a class="row" href="#/s/${esc(stock.code)}">
     <div class="main"><div class="name">${esc(stock.code)} ${esc(stock.name)}</div>
-    <div class="sub">${esc(stock.industry)}・收盤 ${price(stock.close)}</div></div>
-    <div class="right">${chip(stock.overall.code)}<div class="small muted">V1 分數 ${pct(stock.composite_v1)}</div></div>
+    <div class="sub">${esc(stock.industry)}・收盤 ${price(stock.close)}</div>
+    <div class="minis">${aspectMini(stock)}</div></div>
+    <div class="right"><div class="small muted">V1 分數</div><div class="big-score">${pct(stock.composite_v1)}</div></div>
     </a>${star}</li>`;
 }
 
