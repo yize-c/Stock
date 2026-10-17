@@ -131,7 +131,7 @@ function rowHTML(stock) {
     <div class="main"><div class="name">${esc(stock.code)} ${esc(stock.name)}</div>
     <div class="sub">${esc(stock.industry)}</div>
     <div class="minis">${aspectMini(stock)}</div></div>
-    <div class="right"><div class="small muted">V1 分數</div><div class="big-score">${pct(stock.composite_v1)}</div>${stock.reference_label ? `<div class="small muted">回測：${esc(stock.reference_label)}</div>` : ""}</div>
+    <div class="right">${scoreRight(stock)}</div>
     </a>${star}</li>`;
 }
 
@@ -197,33 +197,47 @@ function renderProblem(stock) {
     <p class="disclaimer">${(stock.disclaimer || []).map(esc).join("<br>")}</p>`;
 }
 
-// Historical backtest reference (CLAUDE.md core principle 4): labels come from the program's
-// fixed rule and are always shown with their statistics and caveats.
-const LABEL_CLASS = { "買進參考": "STABLE", "持有參考": "INSUFFICIENT", "賣出參考": "UNSTABLE" };
+// The 0-100 score (spec v2 §4): computed by the export for each capital tier; this file only
+// shows it. Labels come from the program's fixed thresholds and always carry the disclaimer.
+const LABEL_CLASS = { "強": "STABLE", "中": "REGIME_SHIFT", "觀察": "INSUFFICIENT", "弱": "UNSTABLE" };
 function signedPct(value) {
   if (value === null || value === undefined) return "—";
   return `${value > 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
 }
-function backtestHTML(ref) {
-  if (!ref || !ref.available) {
-    return `<p class="small muted">${esc(ref ? ref.reason : "沒有歷史回測資料")}</p>`;
+function scoreRight(stock) {
+  const score = stock.score;
+  if (!score || !score.available) {
+    return `<div class="small muted">分數</div><div class="small muted">未上線</div>`;
   }
-  const rows = Object.entries(ref.horizons).map(([months, st]) => [
-    `${esc(months)} 個月`,
-    signedPct(st.mean),
-    st.n ? `${signedPct(st.ci_low)} ~ ${signedPct(st.ci_high)}` : "—",
-    st.hit_rate === null ? "—" : `${Math.round(st.hit_rate * 100)}%`,
-    String(st.n),
-    signedPct(ref.overall[months] ? ref.overall[months].mean : null),
+  return `<div class="small muted">分數</div><div class="big-score">${Math.round(score.value)}</div>
+    <div class="small"><span class="chip v-${LABEL_CLASS[score.label]}">${esc(score.label)}</span></div>`;
+}
+function researchHTML(r) {
+  if (!r || !r.available) {
+    return `<p class="small muted">${esc(r ? r.reason : "沒有分數資料")}</p>`;
+  }
+  const rows = r.tiers.map((t) => [
+    `NT$${t.capital.toLocaleString("zh-TW")}（${t.holdings} 檔）`,
+    `<strong>${Math.round(t.score)}</strong> <span class="chip v-${LABEL_CLASS[t.label]}">${esc(t.label)}</span>`,
+    `${t.factor.toFixed(1)}${t.odd_lot ? "（零股）" : ""}`,
+    t.cost_ratio === null ? "—" : `${(t.cost_ratio * 100).toFixed(2)}%`,
+    t.cap === null ? "—" : `${t.cap}：${esc(t.cap_reason)}`,
+    `${signedPct(t.history.mean)}（${signedPct(t.history.ci_low)} ~ ${signedPct(t.history.ci_high)}，n=${t.history.n}）`,
+    `${signedPct(t.history.etf_mean)} / ${signedPct(t.history.rf_mean)}`,
   ]);
-  const label = ref.label
-    ? `<span class="chip v-${LABEL_CLASS[ref.label]}">${esc(ref.label)}</span>`
-    : '<span class="chip v-INSUFFICIENT">不標示</span>';
-  return `<p>V1 綜合分數 ${pct(ref.score)}，屬於 ${pct(ref.bucket[0])}–${pct(ref.bucket[1])} 區間：${label}</p>
-    <p class="small muted">${esc(ref.label_reason)}。${esc(ref.rule)}</p>
-    ${table(["期間", "平均超額報酬", "信賴區間", "勝率", "樣本", "全部樣本平均"], rows)}
-    <p class="small muted">回測自 ${esc(ref.start)}，資料至 ${esc(ref.data_as_of)}，產生於 ${esc(ref.generated_at)}。超額報酬 = 相對加權報酬指數。</p>
-    <p class="small"><strong>${esc(ref.disclaimer)}</strong></p>`;
+  const parts = r.parts.map((p) => [
+    esc(p.name),
+    p.points === null ? "—" : `${p.points.toFixed(1)} / ${p.max}`,
+    esc(p.detail),
+  ]);
+  const notes = r.tiers.filter((t) => t.label_note).map((t) => `NT$${t.capital.toLocaleString("zh-TW")}：${esc(t.label_note)}`);
+  const cal = r.calibration;
+  return `<p>基本分 ${r.base.toFixed(1)}，屬於第 ${r.group} 組（共 ${r.groups} 組，1 為最低）。各本金級距的分數 = 基本分 × 本金係數，再套用歷史校準上限。</p>
+    ${table(["本金級距", "分數", "本金係數", "來回成本占比", "上限", `第 ${r.group} 組歷史回測平均（${cal.horizon_months} 個月，扣成本）`, "同期 0050 / 定存"], rows)}
+    ${notes.length ? `<p class="small muted">${notes.join("<br>")}</p>` : ""}
+    ${table(["項目", "得分", "說明"], parts)}
+    <p class="small muted">樣本外基準日 ${esc(cal.out_of_sample[0])}～${esc(cal.out_of_sample[1])}（${cal.months} 個月），資料至 ${esc(cal.data_as_of)}。歷史回測平均，不是預期報酬。</p>
+    <p class="small"><strong>${esc(r.disclaimer)}</strong></p>`;
 }
 
 function renderDetail(s) {
@@ -271,7 +285,7 @@ function renderDetail(s) {
       ${drivers}
     </section>
     <section class="card">${composite}${s.composite_notes.length ? `<p class="small muted">${s.composite_notes.map(esc).join("<br>")}</p>` : ""}</section>
-    ${section("歷史回測參考（非投資建議）", backtestHTML(s.backtest_reference), true)}
+    ${section("分數（歷史回測參考，非投資建議）", researchHTML(s.research_score), true)}
     ${section("這些判定是什麼意思？", `<ul class="legend">${LEGEND.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`)}
     ${section("穩定性指標（V1 vs V3）", metrics, true)}
     ${section("基本面與月營收（未加權）", fundamentals)}

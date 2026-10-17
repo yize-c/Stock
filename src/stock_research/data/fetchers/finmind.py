@@ -472,6 +472,57 @@ def _optional_date(value: Any) -> date | None:
     return date.fromisoformat(str(value)) if value not in (None, "") else None
 
 
+def normalize_exchange_valuation(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """Daily P/E, P/B and dividend yield published by the exchanges (``TaiwanStockPER``).
+
+    A P/E of 0 means the exchange printed none (losses): it becomes NaN, as does a P/B of 0.
+    """
+    _require(raw, ("date", "PER", "PBR"), ticker, "per")
+    frame = pd.DataFrame(
+        {
+            "date": _dates(raw["date"], "per.date", ticker),
+            "pe": raw["PER"].astype("float64"),
+            "pb": raw["PBR"].astype("float64"),
+        }
+    )
+    frame["pe"] = frame["pe"].where(frame["pe"] > 0)
+    frame["pb"] = frame["pb"].where(frame["pb"] > 0)
+    return frame.sort_values("date").reset_index(drop=True)
+
+
+def normalize_institutional(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """Daily buys and sells (shares) per investor type (``TaiwanStockInstitutionalInvestors
+    BuySell``): one row per date and ``investor`` (Foreign_Investor, Investment_Trust, ...)."""
+    if raw.empty:
+        return pd.DataFrame(columns=["date", "investor", "buy", "sell"])
+    _require(raw, ("date", "name", "buy", "sell"), ticker, "institutional")
+    frame = pd.DataFrame(
+        {
+            "date": _dates(raw["date"], "institutional.date", ticker),
+            "investor": raw["name"].astype(str),
+            "buy": raw["buy"].astype("float64"),
+            "sell": raw["sell"].astype("float64"),
+        }
+    )
+    return frame.sort_values(["date", "investor"]).reset_index(drop=True)
+
+
+def normalize_margin(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
+    """Daily margin purchase balance and limit (lots) from ``TaiwanStockMarginPurchase
+    ShortSale``. A limit of 0 (not marginable that day) leaves usage undefined downstream."""
+    if raw.empty:
+        return pd.DataFrame(columns=["date", "balance", "limit"])
+    _require(raw, ("date", "MarginPurchaseTodayBalance", "MarginPurchaseLimit"), ticker, "margin")
+    frame = pd.DataFrame(
+        {
+            "date": _dates(raw["date"], "margin.date", ticker),
+            "balance": raw["MarginPurchaseTodayBalance"].astype("float64"),
+            "limit": raw["MarginPurchaseLimit"].astype("float64"),
+        }
+    )
+    return frame.sort_values("date").reset_index(drop=True)
+
+
 def normalize_dividends(raw: pd.DataFrame, ticker: str) -> pd.DataFrame:
     """Declared dividends per share in NT$ (``TaiwanStockDividend``).
 
@@ -571,6 +622,17 @@ class FinMindFetcher:
     def stock_info(self) -> pd.DataFrame:
         return normalize_stock_info(self._client.dataset("TaiwanStockInfo"))
 
+    def delistings(self) -> pd.DataFrame:
+        """Delisted securities (code, delisted_on), from ``TaiwanStockDelisting``."""
+        raw = self._client.dataset("TaiwanStockDelisting")
+        _require(raw, ("date", "stock_id"), None, "delisting")
+        return pd.DataFrame(
+            {
+                "code": raw["stock_id"].astype(str),
+                "delisted_on": _dates(raw["date"], "delisting.date", None),
+            }
+        )
+
     def trading_dates(self, start: date, end: date) -> list[date]:
         """Past index trading days plus FinMind's copy of the published future schedule."""
         raw = self._client.dataset("TaiwanStockTradingDate", start_date=start, end_date=end)
@@ -634,6 +696,31 @@ class FinMindFetcher:
         raw = self._client.dataset("TaiwanStockPER", data_id=code, start_date=start, end_date=end)
         _require(raw, ("date",), code, "per")
         return sorted(_dates(raw["date"], "per.date", code))
+
+    def exchange_valuation(self, code: str, start: date, end: date) -> pd.DataFrame:
+        """Daily P/E and P/B; the same request as ``valuation_dates`` (one cache entry)."""
+        raw = self._client.dataset("TaiwanStockPER", data_id=code, start_date=start, end_date=end)
+        return normalize_exchange_valuation(raw, code)
+
+    def institutional(self, code: str, start: date, end: date) -> pd.DataFrame:
+        raw = self._client.dataset(
+            "TaiwanStockInstitutionalInvestorsBuySell",
+            data_id=code,
+            start_date=start,
+            end_date=end,
+            allow_empty=True,
+        )
+        return normalize_institutional(raw, code)
+
+    def margin(self, code: str, start: date, end: date) -> pd.DataFrame:
+        raw = self._client.dataset(
+            "TaiwanStockMarginPurchaseShortSale",
+            data_id=code,
+            start_date=start,
+            end_date=end,
+            allow_empty=True,
+        )
+        return normalize_margin(raw, code)
 
     def dividends(self, code: str, start: date, end: date) -> pd.DataFrame:
         raw = self._client.dataset(
