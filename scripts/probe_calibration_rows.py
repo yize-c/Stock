@@ -51,7 +51,9 @@ def checks_of(reason: str) -> list[str]:
 
 def main() -> None:
     config = load_config(Path("config.yaml"))
-    rows = pd.concat([pd.read_parquet(p) for p in sorted(WORK.glob("rows_*.parquet"))])
+    rows = pd.concat(
+        [pd.read_parquet(p) for p in sorted(WORK.glob("rows_*.parquet"))], ignore_index=True
+    )
     rows["year"] = pd.to_datetime(rows["base_date"]).dt.year
     print(f"{len(rows)} rows, {rows['code'].nunique()} stocks", flush=True)
 
