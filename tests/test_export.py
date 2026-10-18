@@ -192,12 +192,23 @@ def _calibration(passed: bool) -> dict:
     }
     period = {"months": 21, "score_range": [0, 100], "delisted_in_horizon": 0,
               "tiers": {str(t): stats for t in tiers}}  # fmt: skip
-    return {
+    per = {
         "passed": passed,
         "gate": {
             "passed": passed,
             "reason": None if passed else "最高分組的樣本外報酬沒有高於最低分組",
         },
+        "cutoffs": [10.0 * i for i in range(1, 10)],
+        "table": [{"group": g, "in_sample": period, "out_of_sample": period} for g in range(1, 11)],
+        "caps": {
+            str(t): {str(g): {"cap": None, "reason": None} for g in range(1, 11)} for t in tiers
+        },
+    }
+    aggressive = per | {"passed": False, "gate": {"passed": False, "reason": "等級相關太低"}}
+    return {
+        **per,
+        "default_preference": "conservative",
+        "preferences": {"conservative": per, "balanced": per, "aggressive": aggressive},
         "data_as_of": "2026-10-16",
         "base_dates": {
             "start": "2021-06-30",
@@ -206,11 +217,6 @@ def _calibration(passed: bool) -> dict:
         },
         "horizon_months": 12,
         "groups": 10,
-        "cutoffs": [10.0 * i for i in range(1, 10)],
-        "table": [{"group": g, "in_sample": period, "out_of_sample": period} for g in range(1, 11)],
-        "caps": {
-            str(t): {str(g): {"cap": None, "reason": None} for g in range(1, 11)} for t in tiers
-        },
     }
 
 
@@ -249,6 +255,14 @@ def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) 
     research = detail["research_score"]
     assert research["available"], research.get("reason")
     assert "可能過度擬合" in research["notes"]
+    # 成長 × 風險 §1.4: one score per investor preference, each calibrated on its own.
+    prefs = research["preferences"]
+    assert research["default_preference"] == "conservative" and prefs["conservative"]["available"]
+    assert prefs["balanced"]["label"] == "平衡" and not prefs["aggressive"]["available"]
+    assert {p["name"] for p in prefs["balanced"]["parts"]} >= {
+        "成長（最近 3 年）",
+        "低風險（100 − 風險分數）",
+    }
     walk_forward = {m["key"]: m["walk_forward"] for m in detail["metrics"]}
     assert walk_forward["roe"] == "正向" and walk_forward.get("volatility") is None
     assert "ROE" in detail["walk_forward_note"]
@@ -264,6 +278,7 @@ def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) 
     row = index["stocks"][0]
     default = next(t for t in research["tiers"] if t["capital"] == 300000)
     assert default["capital_label"] == "30 萬・5 檔"
+    assert not row["score"]["preferences"]["aggressive"]["available"]
     assert row["score"]["available"] and set(row["score"]["tiers"]) == {
         "50000", "300000", "1000000", "3000000",
     }  # fmt: skip

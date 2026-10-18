@@ -114,6 +114,11 @@ def _rows(slope: float, in_sample_slope: float | None = None) -> tuple[pd.DataFr
                     "delisted_in_horizon": False,
                 }
             )
+            rows[-1] |= {  # the aggressive preference ranks the stocks the other way round
+                "score_conservative": rows[-1]["score"],
+                "score_balanced": rows[-1]["score"] + 1.0,
+                "score_aggressive": 80 - 4 * i,
+            }
             for tier in CONFIG.research_score.capital_tiers:
                 rows[-1][f"net_{tier.capital}"] = pipeline.tier_net(
                     rows[-1]["gross"], 50.0, tier.capital, tier.holdings, False, CONFIG
@@ -143,6 +148,31 @@ def test_summary_caps_and_gate_when_higher_scores_earned_more() -> None:
     assert top["ci_low"] < top["mean"] < top["ci_high"] and top["n"] == 2 * 21
     assert result["universe"]["status_counts"] == {"OK": 520, "ERROR": 1}
     assert "不代表未來" in result["disclaimer"]
+
+
+def test_every_preference_is_calibrated_on_its_own_score() -> None:
+    config = _config(groups=5, bootstrap_draws=20)
+    rows, bench = _rows(0.02)
+    result = summary.summarize(
+        rows, _screen(rows), bench, config, datetime(2026, 10, 17, tzinfo=UTC)
+    )
+    per = result["preferences"]
+    assert set(per) == {"conservative", "balanced", "aggressive"}
+    assert per["conservative"]["passed"] and per["balanced"]["passed"]
+    assert not per["aggressive"]["passed"]  # its higher scores earned less
+    assert result["default_preference"] == "conservative"
+    assert result["cutoffs"] == per["conservative"]["cutoffs"]
+    aggressive = summary.for_preference(result, "aggressive")
+    assert aggressive["cutoffs"] == per["aggressive"]["cutoffs"]
+    assert aggressive["data_as_of"] == result["data_as_of"]
+    assert summary.for_preference({"passed": True}, "aggressive") is None  # older file
+
+
+def test_rows_scored_with_an_older_definition_are_refused() -> None:
+    rows, bench = _rows(0.02)
+    old = rows.drop(columns=["score_conservative", "score_balanced", "score_aggressive"])
+    with pytest.raises(summary.RowsError, match="older score definition"):
+        summary.summarize(old, _screen(rows), bench, CONFIG, datetime(2026, 10, 17, tzinfo=UTC))
 
 
 def test_overfitting_warning_compares_in_and_out_of_sample_spreads() -> None:
@@ -221,5 +251,5 @@ def test_cli_score_and_summarize(monkeypatch, tmp_path, raw_config, write_config
     assert result.exit_code == 0, result.output
     result = runner.invoke(cli.app, ["calibration", "summarize", "--config", path])
     assert result.exit_code == 0, result.output
-    assert "gate passed: True" in result.output
+    assert "[conservative] gate passed: True" in result.output
     assert summary.load(tmp_path / "score_calibration.json")["passed"] is True

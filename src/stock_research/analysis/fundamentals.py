@@ -42,6 +42,7 @@ from stock_research.data.windows import TimeWindow
 
 INCOME_ITEMS = {
     "Revenue": "revenue",
+    "CostOfGoodsSold": "cost_of_revenue",
     "GrossProfit": "gross_profit",
     "OperatingIncome": "operating_income",
     "PreTaxIncome": "pretax_income",
@@ -54,6 +55,7 @@ CASH_FLOW_ITEMS = {
     "CashFlowsFromOperatingActivities": "operating_cash_flow",
     "PropertyAndPlantAndEquipment": "ppe_purchases",  # reported as a negative outflow
     "InterestExpense": "interest_expense",
+    "Depreciation": "depreciation",
 }
 BALANCE_ITEMS = {
     "TotalAssets": "total_assets",
@@ -63,6 +65,7 @@ BALANCE_ITEMS = {
     "CurrentAssets": "current_assets",
     "CurrentLiabilities": "current_liabilities",
     "CashAndCashEquivalents": "cash",
+    "Inventories": "inventories",
     "OrdinaryShare": "ordinary_share_capital",
 }
 # Alternative names some industries use (banks and insurers). The first name present wins.
@@ -147,6 +150,10 @@ def ttm_table(quarterly: pd.DataFrame, basis: ShareBasis | None, basis_date: dat
     ends = list(quarterly.index)
     if len(ends) < 4:
         return pd.DataFrame()
+    # Columns a table lacks (e.g. one built before an item was read) are NaN.
+    quarterly = quarterly.reindex(
+        columns=[*quarterly.columns.union(FLOW_COLUMNS + BALANCE_COLUMNS, sort=False)]
+    )
     eps = quarterly["eps"].astype(float)
     if basis is not None:
         eps = basis.to_basis(eps, pd.Series(ends, index=quarterly.index), basis_date)

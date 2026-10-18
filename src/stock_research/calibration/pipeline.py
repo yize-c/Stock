@@ -9,9 +9,10 @@
    stock listed then (after its listing; FinMind's emerging-board days are not counted); the
    most traded ``liquidity_keep_share`` are kept.
 3. ``score`` (one shard of the kept stocks): the data checks once per stock (no Yahoo
-   comparison), then for each kept base date the point-in-time base score and the next
-   ``horizon_months`` gross return on adjusted prices. A stock delisted inside the horizon
-   is valued at its last close (what a holder last could sell at).
+   comparison), then for each kept base date the point-in-time base score of every investor
+   preference (成長 × 風險) and the next ``horizon_months`` gross return on adjusted
+   prices. A stock delisted inside the horizon is valued at its last close (what a holder
+   last could sell at).
 4. ``summary`` (see ``summary.py``).
 
 Every row the stages write is a derived value (scores, returns, liquidity), never a raw
@@ -30,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 from stock_research.analysis.costs import net_return, position_shares
+from stock_research.analysis.growth_risk import assess
 from stock_research.analysis.inputs import load_stock_data
 from stock_research.analysis.research_score import score_stock
 from stock_research.analysis.stability_inputs import stability_report
@@ -41,7 +43,7 @@ from stock_research.validation.metric_walk_forward import positive_metrics
 
 LIQUIDITY_FILE = "liquidity.parquet"
 FETCH_STATUS_FILE = "fetch_status.json"
-PART_KEYS = ("principles", "consistency", "valuation", "risk", "chips")
+PART_KEYS = ("principles", "consistency", "growth", "safety", "chips")
 # A listed stock whose newest TaiwanStockInfo row is older than this is no longer listed.
 _STALE_INFO_DAYS = 30
 # A close used for a base date or a horizon end must be this recent.
@@ -237,6 +239,7 @@ def score_shard(
     """Rows for this shard's stocks: status, base score and parts, forward gross return."""
     settings = config.calibration
     tiers = config.research_score.capital_tiers
+    preferences = config.research_score.preferences
     positive = positive_metrics(config.research_score.consistency.walk_forward_results)
     codes = sorted(set(kept["code"]))[shard::shards]
     rows: list[dict[str, Any]] = []
@@ -262,7 +265,8 @@ def score_shard(
             try:
                 data = load_stock_data(market_data, code, base, with_peers=False)
                 report = stability_report(data, config, with_breakpoints=False)
-                score = score_stock(market_data, data, report, config, positive)
+                growth_risk = assess(market_data, data, report, config)
+                scores = score_stock(market_data, data, report, config, positive, growth_risk)
             except (DataValidationError, ValueError, KeyError) as exc:
                 rows.append(row | {"status": "ERROR", "reason": f"{type(exc).__name__}: {exc}"})
                 continue
@@ -271,11 +275,15 @@ def score_shard(
             )
             close = _close_on_or_before(raw, base)
             price = close[1] if close else None  # used for position sizes, never written
+            score = scores[preferences.default]
             row |= {
                 "status": "OK" if score.score is not None else "NO_SCORE",
                 "reason": score.problem,
                 "score": score.score,
+                **{f"score_{key}": s.score for key, s in scores.items()},
                 **{f"part_{p.key}": p.points for p in score.parts},
+                "growth_score": growth_risk.growth.score,
+                "risk_score": growth_risk.risk.score,
                 "gross": gross,
                 "delisted_in_horizon": delisted_inside,
                 **{
@@ -286,8 +294,9 @@ def score_shard(
             rows.append(row)
     columns = [
         "code", "base_date", "status", "reason", "score",
-        *[f"part_{k}" for k in PART_KEYS], "gross", "delisted_in_horizon",
-        *[f"net_{t.capital}" for t in tiers],
+        *[f"score_{k}" for k in preferences.options],
+        *[f"part_{k}" for k in PART_KEYS], "growth_score", "risk_score",
+        "gross", "delisted_in_horizon", *[f"net_{t.capital}" for t in tiers],
     ]  # fmt: skip
     return pd.DataFrame(rows).reindex(columns=columns)
 

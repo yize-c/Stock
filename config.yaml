@@ -571,12 +571,22 @@ costs:
   reference_position: 100000
 
 research_score:
-  # The 0-100 score of spec v2 §4 (user's choice A, 2026-10-17). Base score from five parts;
+  # The 0-100 score of spec v2 §4 (user's choice A, 2026-10-17). Base score from its parts;
   # a part without data is left out and the others are scaled to 100, but with fewer than
-  # min_available_points of parts available there is no score.
-  points: { principles: 40, consistency: 20, valuation: 15, risk: 15, chips: 10 }
+  # min_available_points of parts available there is no score. Since 成長 × 風險 (user's
+  # plan 1, 2026-10-17) the former valuation (15) and risk (15) parts are folded into the
+  # risk score, and growth and safety (100 - risk score) share growth_risk points.
+  points: { principles: 30, consistency: 20, growth_risk: 40, chips: 10 }
   max_chips_share: 0.15  # spec v2 P2-11: chips weigh at most 15%
   min_available_points: 70
+  preferences:
+    # 成長 × 風險 §1.4: only the growth / safety split of growth_risk changes; the default is
+    # the senior investor's (conservative: risk weighs more).
+    default: conservative
+    options:
+      conservative: { label: 保守, growth_share: 0.375 }  # 15 growth / 25 safety
+      balanced: { label: 平衡, growth_share: 0.5 }  # 20 / 20
+      aggressive: { label: 積極, growth_share: 0.625 }  # 25 / 15
   consistency:
     # B: among the metrics whose walk-forward is positive (written by
     # `stock-research validation metric-walk-forward`), the share judged STABLE.
@@ -584,18 +594,10 @@ research_score:
     full_share: 1.0
     partial_share: 0.5
   valuation:
-    # C: percentile of today's exchange P/E and P/B among the stock's own daily values over
-    # the last lookback_years (lower is better); needs at least min_years of history.
+    # Percentile of today's exchange P/E and P/B among the stock's own daily values over the
+    # last lookback_years (the risk score's overheating); needs at least min_years.
     lookback_years: 10
     min_years: 3
-  risk:
-    # D: daily volatility and maximum drawdown of the adjusted price over lookback_years,
-    # each divided by the TAIEX total-return index's; a ratio at or below ratio_full scores
-    # full points, at or above ratio_zero none, linearly between.
-    lookback_years: 3
-    min_trading_days: 250
-    ratio_full: 1.0
-    ratio_zero: 3.0
   chips:
     # E (spec v2 P2-11), three factors averaged, each 0.5 at "no change":
     # - the three institutional investors' combined net buying (+) or selling (-) days in a
@@ -703,3 +705,53 @@ portfolio:
     fallback_etf: "0050"
     cost_ratio_warning: 0.008
   backup_reminder_days: 30
+
+growth:
+  # 成長 × 風險 §1.1 (the senior investor's view, 2026-10-17): the last lookback_years of
+  # actual results, published by as_of, as a reference for future growth (not a forecast).
+  # Each item maps linearly from 0 (at zero) to 1 (at full), clipped; the score is 100 x the
+  # weighted mean of the items with data. Ratios are fractions (0.20 = 20%).
+  lookback_years: 3
+  min_items: 2
+  min_trend_points: 8
+  revenue_cagr: { weight: 0.3, zero: 0.0, full: 0.20 }
+  eps_cagr: { weight: 0.3, zero: 0.0, full: 0.25 }
+  revenue_yoy: { weight: 0.2, zero: 0.0, full: 0.20 }
+  gross_margin_trend: { weight: 0.2, zero: -0.02, full: 0.02 }  # per year: -2 to +2 points
+
+risk_rating:
+  # 成長 × 風險 §1.2: 0-100, higher is more dangerous; historical statistics, not future
+  # probabilities. Each item is a danger 0-1 from its band (0 at zero, 1 at full, either
+  # direction, clipped); the score is 100 x the weighted mean of the items with data.
+  # "股價被炒高就是最大的風險": overheating weighs the most (checked when loading).
+  lookback_years: 3
+  week52_days: 365
+  min_week52_days: 120
+  min_trading_days: 250
+  min_weight: 0.6
+  weights: { overheat: 0.35, drawdown: 0.20, off_high: 0.15, volatility: 0.15, stability: 0.15 }
+  drawdown: { zero: 0.20, full: 0.60 }
+  # Near the 52-week high is taken as more dangerous (the senior investor's "炒高"); 30% or
+  # more below it, as no extra danger. Swap zero and full to read it the other way.
+  off_high: { zero: 0.30, full: 0.0 }
+  rise_from_low: { zero: 0.10, full: 1.00 }
+  price_share: 0.5  # overheating = this x rise from the low + the rest x P/E-P/B percentile
+  volatility: { zero: 0.20, full: 0.60 }
+  beta: { zero: 0.8, full: 1.5 }
+  stability: { stable: 0.0, regime_shift: 0.5, unstable: 1.0 }
+
+quadrant:
+  # 成長 × 風險 §1.3: growth score at or above growth_high is 高成長, at or above growth_mid
+  # 中成長, else 低成長; risk score at or above risk_high is 高風險, else 低風險.
+  growth_high: 67
+  growth_mid: 33
+  risk_high: 50
+  preferred: mid_low  # 中成長・低風險, the senior investor's preference
+
+risk_checklist:
+  # 成長 × 風險 §1.2.1: the user's five TSMC risks turned into numbers where statements allow
+  # (information only, never scored); the rest comes from documents the user provides.
+  lookback_years: 3
+  min_points: 4
+  flat_points: 0.01  # ratios: a change under 1 percentage point over the window is flat
+  flat_relative: 0.05  # amounts and days: a change under 5% of the mean level is flat

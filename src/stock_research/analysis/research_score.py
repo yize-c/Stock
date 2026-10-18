@@ -6,12 +6,11 @@ Base score (independent of capital), points per part from ``research_score.point
 * B consistency: among the metrics whose walk-forward is positive (decided metric by metric,
   the user's choice b), the share judged STABLE (V1 and V3 agree): all of them -> full points,
   at least ``partial_share`` -> half, fewer -> none. INSUFFICIENT metrics are not counted.
-* C valuation: percentile of the latest exchange P/E and P/B among the stock's own daily
-  values over ``lookback_years`` (only days after the listing); points x (1 - mean
-  percentile). A P/E of a loss-making year is not printed and is left out.
-* D risk: daily volatility and maximum drawdown of the adjusted price over ``lookback_years``,
-  each divided by the TAIEX total-return index's on the same days; each ratio maps linearly
-  from full points (``ratio_full``) to none (``ratio_zero``), and the two are averaged.
+* growth and safety (成長 × 風險, user's plan 1): ``points.growth_risk`` split by the
+  investor preference into growth points (x growth score / 100) and safety points
+  (x (100 - risk score) / 100). The former valuation and risk parts are folded into the risk
+  score (its overheating uses the same P/E-P/B percentile as before). One base score per
+  preference; only these two weights differ.
 * E chips (spec v2 P2-11), three factors averaged: the three institutional investors'
   combined net buying or selling days in a row (0.5 at none, full at ``streak_full_days`` of
   buying, none at as many of selling); the investment trust's net buying over
@@ -31,7 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -46,18 +45,22 @@ from stock_research.config import (
     ChipsScoreConfig,
     ConsistencyScoreConfig,
     ResearchScoreConfig,
-    RiskScoreConfig,
     ValuationScoreConfig,
 )
 from stock_research.data.errors import DataValidationError
 from stock_research.data.market_data import MarketData
 from stock_research.data.windows import WindowName
 
+if TYPE_CHECKING:  # the growth and risk modules import this one
+    from stock_research.analysis.growth import GrowthScore
+    from stock_research.analysis.growth_risk import GrowthRisk
+    from stock_research.analysis.risk_rating import RiskRating
+
 PART_NAMES = {
     "principles": "投資大師原則",
     "consistency": "一致性（V1／V3 與 walk-forward）",
-    "valuation": "估值位置",
-    "risk": "風險",
+    "growth": "成長（最近 3 年）",
+    "safety": "低風險（100 − 風險分數）",
     "chips": "籌碼",
 }
 # A latest daily value older than this (a halt) is too stale to describe as_of.
@@ -71,7 +74,7 @@ DISCLAIMER = (
 @dataclass(frozen=True)
 class ScorePart:
     key: str
-    max_points: int
+    max_points: float
     points: float | None  # None: no data for this part
     detail: str
 
@@ -138,34 +141,39 @@ def consistency_part(
     )
 
 
-def _years_before(day: date, years: int) -> date:
+def years_before(day: date, years: int) -> date:
     try:
         return day.replace(year=day.year - years)
     except ValueError:  # 29 February
         return day.replace(year=day.year - years, day=28)
 
 
-def valuation_part(
-    valuation: pd.DataFrame,
-    as_of: date,
-    listing: date | None,
-    settings: ValuationScoreConfig,
-    points: int,
-) -> ScorePart:
+@dataclass(frozen=True)
+class ValuationPosition:
+    """Where today's exchange P/E and P/B sit among the stock's own daily values."""
+
+    percentiles: dict[str, float]  # "pe" / "pb" -> share of own days at or below today
+    notes: tuple[str, ...]
+    problem: str | None  # no usable history at all
+
+
+def valuation_position(
+    valuation: pd.DataFrame, as_of: date, listing: date | None, settings: ValuationScoreConfig
+) -> ValuationPosition:
     """``valuation``: date, pe, pb (exchange daily values; NaN where none was printed)."""
-    start = _years_before(as_of, settings.lookback_years)
+    start = years_before(as_of, settings.lookback_years)
     if listing is not None:
         start = max(start, listing)
     inside = valuation.loc[[start <= d <= as_of for d in valuation["date"]]]
     if inside.empty or (as_of - max(inside["date"])).days > _MAX_STALE_DAYS:
-        return ScorePart("valuation", points, None, "近期沒有交易所本益比資料")
+        return ValuationPosition({}, (), "近期沒有交易所本益比資料")
     span_years = (max(inside["date"]) - min(inside["date"])).days / 365.25
     if span_years < settings.min_years:
-        return ScorePart(
-            "valuation", points, None, f"估值歷史 {span_years:.1f} 年，少於 {settings.min_years} 年"
+        return ValuationPosition(
+            {}, (), f"估值歷史 {span_years:.1f} 年，少於 {settings.min_years} 年"
         )
     latest = inside.iloc[-1]
-    found, notes = [], []
+    found, notes = {}, []
     for column, label in (("pe", "本益比"), ("pb", "股價淨值比")):
         history = inside[column].dropna()
         current = latest[column]
@@ -173,51 +181,28 @@ def valuation_part(
             notes.append(f"{label}無資料（虧損時交易所不列本益比）")
             continue
         percentile = float((history <= current).mean())
-        found.append(percentile)
+        found[column] = percentile
         notes.append(f"{label}位於自身 {span_years:.0f} 年第 {percentile:.0%} 百分位")
-    if not found:
-        return ScorePart("valuation", points, None, "；".join(notes))
-    earned = points * (1.0 - float(np.mean(found)))
-    return ScorePart("valuation", points, earned, "；".join(notes))
+    return ValuationPosition(found, tuple(notes), None)
 
 
-def _ratio_score(ratio: float, settings: RiskScoreConfig) -> float:
-    span = settings.ratio_zero - settings.ratio_full
-    return float(np.clip((settings.ratio_zero - ratio) / span, 0.0, 1.0))
+def growth_part(growth: GrowthScore, points: float) -> ScorePart:
+    if growth.score is None:
+        return ScorePart("growth", points, None, growth.problem or "成長分數無法計算")
+    return ScorePart(
+        "growth", points, points * growth.score / 100, f"成長分數 {growth.score:.0f}／100"
+    )
 
 
-def _drawdown(levels: np.ndarray) -> float:
-    peaks = np.maximum.accumulate(levels)
-    return float(np.max(1.0 - levels / peaks))
-
-
-def risk_part(
-    adjusted: pd.DataFrame,
-    benchmark: pd.DataFrame,
-    as_of: date,
-    settings: RiskScoreConfig,
-    points: int,
-) -> ScorePart:
-    """``adjusted``: date, adj_close; ``benchmark``: date, total_return_index."""
-    start = _years_before(as_of, settings.lookback_years)
-    stock = adjusted.set_index("date")["adj_close"].dropna().astype(float)
-    index = benchmark.set_index("date")["total_return_index"].dropna().astype(float)
-    days = sorted(d for d in set(stock.index) & set(index.index) if start <= d <= as_of)
-    if len(days) < settings.min_trading_days or (as_of - days[-1]).days > _MAX_STALE_DAYS:
-        return ScorePart(
-            "risk", points, None, f"{len(days)} 個共同交易日，少於 {settings.min_trading_days}"
-        )
-    s, b = stock.loc[days].to_numpy(), index.loc[days].to_numpy()
-    vol_ratio = float(np.std(np.diff(s) / s[:-1], ddof=1) / np.std(np.diff(b) / b[:-1], ddof=1))
-    scores = [_ratio_score(vol_ratio, settings)]
-    detail = [f"波動度為大盤的 {vol_ratio:.2f} 倍"]
-    index_drawdown = _drawdown(b)
-    if index_drawdown > 0:
-        dd_ratio = _drawdown(s) / index_drawdown
-        scores.append(_ratio_score(dd_ratio, settings))
-        detail.append(f"最大回撤為大盤的 {dd_ratio:.2f} 倍")
-    detail.append(f"{days[0]}～{days[-1]}，歷史統計值")
-    return ScorePart("risk", points, points * float(np.mean(scores)), "；".join(detail))
+def safety_part(risk: RiskRating, points: float) -> ScorePart:
+    if risk.score is None:
+        return ScorePart("safety", points, None, risk.problem or "風險分數無法計算")
+    return ScorePart(
+        "safety",
+        points,
+        points * (100 - risk.score) / 100,
+        f"風險分數 {risk.score:.0f}／100（越高越危險）",
+    )
 
 
 def _streak(net: pd.Series) -> int:
@@ -410,44 +395,37 @@ def score_stock(
     report: StabilityReport,
     config: AppConfig,
     positive: tuple[frozenset[str], str] | None,
-) -> BaseScore:
-    """The base score at ``data.as_of``; a part whose data cannot be loaded is left out and
-    says why (its error), never filled in."""
+    growth_risk: GrowthRisk,
+) -> dict[str, BaseScore]:
+    """The base score at ``data.as_of`` for every investor preference; a part whose data
+    cannot be loaded is left out and says why (its error), never filled in."""
     settings = config.research_score
     ticker = market_data.resolve(data.code)
     as_of = data.as_of
-
-    def loaded(key: str, build) -> ScorePart:
-        try:
-            return build()
-        except DataValidationError as exc:
-            return ScorePart(key, getattr(settings.points, key), None, f"資料無法取得：{exc}")
-
-    parts = [
+    try:
+        chips = chips_part(
+            market_data.institutional(ticker, as_of),
+            market_data.margin(ticker, as_of),
+            data.prices.raw,
+            shares_outstanding(data.quarterly, data.basis, as_of),
+            as_of,
+            settings.chips,
+            settings.points.chips,
+        )
+    except DataValidationError as exc:
+        chips = ScorePart("chips", settings.points.chips, None, f"資料無法取得：{exc}")
+    fixed = [
         principles_part(report, settings.points.principles),
         consistency_part(report, positive, settings.consistency, settings.points.consistency),
-        loaded(
-            "valuation",
-            lambda: valuation_part(
-                market_data.exchange_valuation(ticker, as_of),
-                as_of,
-                market_data.listing_date(ticker),
-                settings.valuation,
-                settings.points.valuation,
-            ),
-        ),
-        risk_part(data.prices.adjusted, data.benchmark, as_of, settings.risk, settings.points.risk),
-        loaded(
-            "chips",
-            lambda: chips_part(
-                market_data.institutional(ticker, as_of),
-                market_data.margin(ticker, as_of),
-                data.prices.raw,
-                shares_outstanding(data.quarterly, data.basis, as_of),
-                as_of,
-                settings.chips,
-                settings.points.chips,
-            ),
-        ),
     ]
-    return base_score(as_of, parts, settings)
+    scores = {}
+    for key, preference in settings.preferences.options.items():
+        growth_points = settings.points.growth_risk * preference.growth_share
+        parts = [
+            *fixed,
+            growth_part(growth_risk.growth, growth_points),
+            safety_part(growth_risk.risk, settings.points.growth_risk - growth_points),
+            chips,
+        ]
+        scores[key] = base_score(as_of, parts, settings)
+    return scores

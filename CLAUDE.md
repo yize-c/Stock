@@ -83,7 +83,7 @@
 - Hooks（`.claude/hooks/`，只用標準函式庫，測試在 `tests/test_hooks.py`）：
   - `format_and_test.py`：編輯 Python 檔後跑 `ruff format` 與 import 該模組的測試，失敗回報給 Claude。
   - `guard_secrets.py`：`git commit` 前掃描所有可能被提交的變更（含未追蹤檔），發現 `.env`、環境變數／`.env` 中 token 的值、或 Anthropic key／JWT 形狀字串就擋下。
-  - `protect_forward_log.py`：`validation/forward_log/` 已存在的檔案不可修改；shell 指令以該資料夾為寫入、搬移、刪除目標一律擋下（heredoc 內容不算）。
+  - `protect_forward_log.py`：`validation/forward_log/`、`expert_forms/`、`reviews/` 已存在的檔案不可修改；shell 指令以該資料夾為寫入、搬移、刪除目標一律擋下（heredoc 內容不算）。
 - Subagents：`data-auditor`、`report-reviewer`、`validation-reviewer`（唯讀）；Skill `stock-analysis`；指令 `/analyze <代號>` 跑分析後交給 report-reviewer。
 - 保留期的執行限制在第 10 階段由程式檢查（`preregistration.md` 未 commit 就拒絕 `--phase holdout`）。
 
@@ -119,7 +119,7 @@
 - 主動式 ETF（b）：追蹤 FinMind `TaiwanStockActiveETFInfo` 中全部 `category: domestic` 的台股主動式 ETF（2026-10-17 共 23 檔）；00986A 為海外型排除，00992A 為台股型納入。
 
 ## 0–100 分數（v2 第四節，第 3 階段）
-- 基本分（`research_score`，`analysis/research_score.py`）：A 投資大師原則 40（V1 綜合分數）、B 一致性 20（walk-forward 正向的指標中 V1／V3 一致的比例：全部 20、至少一半 10）、C 估值 15（交易所本益比、股價淨值比在自身 10 年的百分位）、D 風險 15（3 年波動度、最大回撤 ÷ 報酬指數）、E 籌碼 10（三大法人連續買賣超、投信持股變化、融資使用率；第 6 階段起）。缺資料的項目不計、其餘換算成 100；可計算項目少於 70 分就不給分。
+- 基本分（`research_score`，`analysis/research_score.py`）：A 投資大師原則 30（V1 綜合分數）、B 一致性 20（walk-forward 正向的指標中 V1／V3 一致的比例：全部 20、至少一半 10）、成長與風險 40（成長 × 風險方案 1，見該節；原本的 C 估值 15、D 風險 15 已併入風險分數）、E 籌碼 10（三大法人連續買賣超、投信持股變化、融資使用率；第 6 階段起）。缺資料的項目不計、其餘換算成 100；可計算項目少於 70 分就不給分。
 - 本金級距 5 萬（3 檔）／30 萬（5 檔）／100 萬（10 檔）／300 萬（15 檔），預設顯示 30 萬；最終分數 = min(基本分 × 本金係數, 校準上限)。標示 ≥75 強、60–74 中、45–59 觀察、<45 弱。
 - 校準（`calibration`，`calibration/`，GitHub Actions `calibration.yml`，Secret `SECOND_FINMIND`）：2021-06～2025-09 每月底、全市場普通股含 2021-06 後下市者、每月保留成交金額前 50%、每月分 10 組、之後 12 個月報酬扣一次來回成本；2024-01 起為樣本外，對照表、上限、門檻只用樣本外。固定時鐘 `data_as_of` 讓多天的抓取共用快取。未做 Yahoo 交叉比對（Yahoo 沒有已下市股），其餘資料檢查照常。
 - 上市日推不出來時（2002～2005-09 開始交易的股票），改用證交所／櫃買 OpenAPI 的官方上市日（只在 GitHub 上連得到）。
@@ -150,7 +150,16 @@
 - 分數 B 項「walk-forward 正向」（使用者選 b）：以指標層級計算——該指標的 walk-forward AUC 高於隨機基準時，該指標的 V1／V3 一致才算數；目前只有開發期資料，需註明為樣本內結果。
 - ETF 資料來源（使用者：不用錢、不違法即可）：FinMind 主動式 ETF 持股需 Sponsor 付費、沒有指數型 ETF 成分股；元大官網 0050 持股頁公開列出股數與權重（使用條款未找到）；統一投信（00981A）條款禁止未經同意轉載；證交所 e添富需書面同意（開放資料平臺除外）。持股原始資料不可放上公開網站。
 - ETF 透視分數（使用者選 b）：持股只用來計算，網站只放算出的透視分數與覆蓋率，不放持股明細或權重。
+- 主動式 ETF 持股來源（第 8 題，使用者 2026-10-17 選「a，不行就 c」）→ **c：不做主動式 ETF 的透視分數**。探測（`scripts/probe_mops_holdings.py`）：MOPS 有主動式 ETF 每季持股明細（t78sb39_q4），但證交所使用條款禁止未經同意以自動化程式下載網站資料，使用、重製、散布需事前書面同意（授權政府資料開放平臺的資料除外）；證交所 OpenAPI 沒有 ETF 持股資料集（只有基金基本資料 t187ap47_L）。日後取得證交所書面同意或出現開放資料再改回 a。
 - PR（使用者 2026-10-17）：這批改動（v2 第 2 階段、網站、跨來源與央行利率）驗證完成後可自行開 PR 並 merge。
+
+## 成長 × 風險（資深股民意見，2026-10-17 第四份 prompt）
+- 成長分數（`analysis/growth.py`，config `growth`，最近 `lookback_years` 3 年、只用 as_of 前已公告的資料，畫面與報告寫明「不是預測」）：營收年複合成長率（最新 12 個月月營收對 3 年前同 12 個月）、EPS 年複合成長率（近四季 EPS、調整後股數，對 3 年前同一季；3 年前 ≤ 0 不適用，由正轉非正給 0）、近 12 個月月營收年增率平均、毛利率趨勢（近 3 年近四季毛利率的最小平方斜率，每年百分點；金融業無毛利率）。各項依 config 的 zero／full 線性換成 0–1，加權平均 ×100；有資料的項目少於 `min_items` 不給分。區間（zero／full）由 Claude 先訂預設值，使用者可調。
+- 風險分數（`analysis/risk_rating.py`，config `risk_rating`，0–100 越高越危險，標示「歷史統計值，不是未來機率」）：過熱程度（權重最高，config 會檢查；= `price_share` × 一年內從 52 週低點的漲幅 + 其餘 × 本益比／股價淨值比在自身 10 年的百分位，百分位沿用 `research_score.valuation`）、最大回撤（近 3 年與全期取較差，還原權息價格）、目前距 52 週高點（原始收盤價；預設**越接近高點越危險**，Claude 依「股價被炒高是最大風險」判斷，對調 `off_high` 的 zero／full 即可反過來）、近 3 年年化波動度與 Beta（還原價格、對加權報酬指數）、獲利面向 V1／V3 判定（不穩定加分）。52 週高低點用原始收盤價（停牌日不算），回撤用還原價格，兩者不混用。有資料的權重少於 `min_weight` 不給分。
+- 配分（使用者選方案 1）：成長與風險 40 分依投資人偏好（`research_score.preferences`）分給成長與低風險（100 − 風險分數）：保守（預設，資深股民偏好）15／25、平衡 20／20、積極 25／15；偏好只改這兩個權重，不改任何原始數字。每種偏好各自校準（`calibration/summary.py` 的 `preferences`），沒通過門檻的偏好不上線；匯出的分數最上層是預設偏好，`preferences` 放各偏好。`analysis/growth_risk.py` 的 `assess` 是分析、匯出、校準共用的入口。
+- 風險檢查清單（`analysis/risk_checklist.py`，config `risk_checklist`，**資訊項、不計分**）：使用者列的台積電五項風險。量化（已公告財報與月營收）：支出過高＝資本支出÷營收、自由現金流、折舊年增率；需求不穩定＝月營收年增率 12 個月標準差、存貨周轉天數（近四季平均存貨÷營業成本×365）、營收季增率；能源原物料＝營業成本率、毛利率。每項顯示最新值與近 3 年方向（最小平方變化，比率差 <1 個百分點、金額與天數差 <平均 5% 為持平），並標出風險升高的方向。業務太集中、政治因素沒有量化指標；質化部分（第 5 步）從使用者放入的文件由 LLM 摘要，沒文件就寫「未提供文件」。財報新讀入 CostOfGoodsSold、Depreciation、Inventories。
+- 專家紀錄（`validation/expert_forms/2026-10-17_senior_investor.yaml`）：資深股民的 14 條原則與台積電判斷（中成長・高風險）。`stock-research validation compare-expert <紀錄>` 在判斷日重算成長、風險、象限，寫成新的對照檔（`*_comparison_<台北時間 YYYY-MM-DDTHHMM>.md`，已存在就拒絕），列出每個不一致的軸與造成它的指標；repo 公開，所以只寫程式算出的比率與分數，不寫 EPS 等財報原始數字。`validation/expert_forms/` 與 `validation/reviews/` 和 `forward_log/` 一樣只能新增（`.claude/hooks/protect_forward_log.py`）。
+- 四象限（`quadrant` config：成長 ≥67 高、≥33 中，風險 ≥50 高）：中成長・低風險為資深股民偏好。「距 52 週高點」越接近越危險，使用者確認。
 
 ## 三個版本（TimeWindow）
 | 版本 | 名稱 | 股價 | 財報 |

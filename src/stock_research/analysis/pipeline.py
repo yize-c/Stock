@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from stock_research.analysis.fundamentals import summarize, ttm_table
+from stock_research.analysis.growth_risk import GrowthRisk, assess
 from stock_research.analysis.inputs import StockData, load_stock_data
 from stock_research.analysis.results import InsufficientHistory
 from stock_research.analysis.returns import ReturnComparison, compare_returns
@@ -92,6 +93,7 @@ class Analysis:
     revenue_yoy: dict[WindowName, Stat]
     technicals: Technicals | None
     llm: LlmSection | None
+    growth_risk: GrowthRisk  # 成長 × 風險: last 3 years' growth, risk score, quadrant
 
 
 def _risk(data: StockData, analysis_config: AppConfig, stability: StabilityReport):
@@ -230,4 +232,5 @@ def run_analysis(
         revenue_yoy=yoy,
         technicals=technicals(data.prices.adjusted, config.technicals),
         llm=llm,
+        growth_risk=assess(market_data, data, stability, config),
     )

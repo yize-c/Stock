@@ -130,6 +130,24 @@ def test_forward_log_allows_new_files_and_blocks_existing(tmp_path):
     assert _run("protect_forward_log.py", other).returncode == 0
 
 
+@pytest.mark.parametrize("folder", ["expert_forms", "reviews"])
+def test_expert_records_and_reviews_are_append_only_too(tmp_path, folder):
+    """成長 × 風險 §3: expert records and monthly reviews follow the forward log's rule."""
+    records = tmp_path / "validation" / folder
+    records.mkdir(parents=True)
+    (records / "2026-10-17_record.yaml").write_text("x: 1\n")
+    new = _edit(tmp_path, f"validation/{folder}/2026-10-18_follow_up.md")
+    assert _run("protect_forward_log.py", new).returncode == 0
+    existing = _edit(tmp_path, f"validation/{folder}/2026-10-17_record.yaml", "Edit")
+    assert _run("protect_forward_log.py", existing).returncode == 2
+    shell = {
+        "tool_name": "Bash",
+        "tool_input": {"command": f"rm validation/{folder}/2026-10-17_record.yaml"},
+        "cwd": str(tmp_path),
+    }
+    assert _run("protect_forward_log.py", shell).returncode == 2
+
+
 @pytest.mark.parametrize(
     ("command", "code"),
     [

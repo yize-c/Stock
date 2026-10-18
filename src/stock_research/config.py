@@ -749,19 +749,37 @@ class CostsConfig(_Model):
 
 
 class ScorePointsConfig(_Model):
-    """Points of each part of the 0-100 base score (spec v2 §4.1)."""
+    """Points per part (成長 × 風險, user's plan 1): the growth and risk points are split
+    between growth and safety (100 - risk score) by the investor preference."""
 
-    principles: PositiveInt  # A: investor-principle frameworks
-    consistency: PositiveInt  # B: V1/V3 agreement on walk-forward-positive metrics
-    valuation: PositiveInt  # C: P/E and P/B within the stock's own range
-    risk: PositiveInt  # D: volatility and drawdown against the benchmark
-    chips: PositiveInt  # E: institutional flows and margin use
+    principles: NonNegativeInt
+    consistency: NonNegativeInt
+    growth_risk: NonNegativeInt
+    chips: NonNegativeInt
 
     @model_validator(mode="after")
     def _check_total(self) -> ScorePointsConfig:
-        total = self.principles + self.consistency + self.valuation + self.risk + self.chips
+        total = self.principles + self.consistency + self.growth_risk + self.chips
         if total != 100:
             raise ValueError(f"score points must add up to 100, got {total}")
+        return self
+
+
+class PreferenceConfig(_Model):
+    label: str = Field(min_length=1)
+    growth_share: Fraction  # of points.growth_risk; the rest weighs safety (low risk)
+
+
+class PreferencesConfig(_Model):
+    """Investor preference (成長 × 風險 §1.4): only the growth / safety weights change."""
+
+    default: str
+    options: dict[str, PreferenceConfig]
+
+    @model_validator(mode="after")
+    def _check(self) -> PreferencesConfig:
+        if self.default not in self.options:
+            raise ValueError("preferences.default must be one of the options")
         return self
 
 
@@ -780,19 +798,6 @@ class ConsistencyScoreConfig(_Model):
 class ValuationScoreConfig(_Model):
     lookback_years: PositiveInt
     min_years: PositiveFloat
-
-
-class RiskScoreConfig(_Model):
-    lookback_years: PositiveInt
-    min_trading_days: PositiveInt
-    ratio_full: PositiveFloat  # stock/benchmark at or below this: full points
-    ratio_zero: PositiveFloat  # at or above this: none
-
-    @model_validator(mode="after")
-    def _check_order(self) -> RiskScoreConfig:
-        if self.ratio_zero <= self.ratio_full:
-            raise ValueError("risk.ratio_zero must exceed ratio_full")
-        return self
 
 
 class ChipsScoreConfig(_Model):
@@ -839,8 +844,8 @@ class ResearchScoreConfig(_Model):
     max_chips_share: Fraction
     min_available_points: Annotated[int, Field(ge=1, le=100)]
     consistency: ConsistencyScoreConfig
-    valuation: ValuationScoreConfig
-    risk: RiskScoreConfig
+    preferences: PreferencesConfig
+    valuation: ValuationScoreConfig  # the P/E-P/B percentile of the risk score's overheating
     chips: ChipsScoreConfig
     capital_tiers: Annotated[list[CapitalTierConfig], Field(min_length=1)]
     default_capital: PositiveInt
@@ -927,6 +932,114 @@ class PortfolioConfig(_Model):
     backup_reminder_days: PositiveInt
 
 
+class BandConfig(_Model):
+    """A linear 0-1 scale: 0 at ``zero``, 1 at ``full`` (either direction), clipped."""
+
+    zero: float
+    full: float
+
+    @model_validator(mode="after")
+    def _check(self) -> BandConfig:
+        if self.zero == self.full:
+            raise ValueError("a band needs zero != full")
+        return self
+
+
+class GrowthItemConfig(BandConfig):
+    weight: Annotated[float, Field(ge=0.0)]
+
+
+class GrowthConfig(_Model):
+    """Growth score (成長 × 風險 §1.1): the last ``lookback_years`` of actual, published
+    results as a reference for future growth, not a forecast. Each item maps linearly to 0-1
+    with its band; the score is 100 x the weighted mean of the items with data."""
+
+    lookback_years: PositiveInt
+    min_items: PositiveInt  # fewer items with data: no growth score
+    min_trend_points: Annotated[int, Field(ge=3)]  # TTM gross margins needed for the trend
+    revenue_cagr: GrowthItemConfig  # last 12 months' revenue vs the same months years ago
+    eps_cagr: GrowthItemConfig  # TTM EPS (one share basis) vs the TTM years ago
+    revenue_yoy: GrowthItemConfig  # mean monthly revenue YoY of the last 12 months
+    gross_margin_trend: GrowthItemConfig  # slope of TTM gross margin, per year
+
+    @model_validator(mode="after")
+    def _check(self) -> GrowthConfig:
+        if self.min_items > 4:
+            raise ValueError("growth.min_items cannot exceed the 4 items")
+        return self
+
+
+class RiskWeightsConfig(_Model):
+    overheat: Annotated[float, Field(ge=0.0)]
+    drawdown: Annotated[float, Field(ge=0.0)]
+    off_high: Annotated[float, Field(ge=0.0)]
+    volatility: Annotated[float, Field(ge=0.0)]
+    stability: Annotated[float, Field(ge=0.0)]
+
+    @model_validator(mode="after")
+    def _check(self) -> RiskWeightsConfig:
+        others = (self.drawdown, self.off_high, self.volatility, self.stability)
+        if any(self.overheat <= w for w in others):
+            raise ValueError("risk_rating.weights.overheat must be the largest weight (spec)")
+        return self
+
+
+class StabilityDangerConfig(_Model):
+    """Danger 0-1 of the profitability aspect's V1/V3 verdict."""
+
+    stable: Annotated[float, Field(ge=0.0, le=1.0)]
+    regime_shift: Annotated[float, Field(ge=0.0, le=1.0)]
+    unstable: Annotated[float, Field(ge=0.0, le=1.0)]
+
+
+class RiskRatingConfig(_Model):
+    """Risk score (成長 × 風險 §1.2): 0-100, higher is more dangerous. Each item is a danger
+    0-1 (bands: 0 at ``zero``, 1 at ``full``); the score is 100 x their weighted mean."""
+
+    lookback_years: PositiveInt  # drawdown (with the full period), volatility and beta
+    week52_days: PositiveInt  # calendar days of the 52-week high and low
+    min_week52_days: PositiveInt  # trading days needed inside that span
+    min_trading_days: PositiveInt  # common trading days for volatility and beta
+    min_weight: Annotated[float, Field(gt=0.0, le=1.0)]  # share of weights with data needed
+    weights: RiskWeightsConfig
+    drawdown: BandConfig  # the worse of the recent and the full-period maximum drawdown
+    off_high: BandConfig  # fall from the 52-week high (raw closes)
+    rise_from_low: BandConfig  # rise from the 52-week low (raw closes), overheating part 1
+    price_share: Annotated[float, Field(ge=0.0, le=1.0)]  # part 1's share; P/E-P/B the rest
+    volatility: BandConfig  # annualized, adjusted prices
+    beta: BandConfig  # against the total-return index
+    stability: StabilityDangerConfig
+
+
+class RiskChecklistConfig(_Model):
+    """Risk checklist (成長 × 風險 §1.2.1): information only, never scored. Each metric shows
+    its latest value and its direction over ``lookback_years``; a change smaller than the
+    tolerance is "持平"."""
+
+    lookback_years: PositiveInt
+    min_points: Annotated[int, Field(ge=2)]  # values needed for a direction
+    flat_points: PositiveFloat  # ratios: change below this (0.01 = 1 point) is flat
+    flat_relative: PositiveFloat  # amounts and days: change below this share is flat
+
+
+class QuadrantConfig(_Model):
+    """Growth x risk quadrants (成長 × 風險 §1.3)."""
+
+    growth_high: Annotated[float, Field(ge=0.0, le=100.0)]  # growth score at or above: 高成長
+    growth_mid: Annotated[float, Field(ge=0.0, le=100.0)]  # at or above: 中成長, below: 低成長
+    risk_high: Annotated[float, Field(ge=0.0, le=100.0)]  # risk score at or above: 高風險
+    preferred: str  # the senior investor's preferred quadrant key, e.g. "mid_low"
+
+    @model_validator(mode="after")
+    def _check(self) -> QuadrantConfig:
+        if self.growth_mid >= self.growth_high:
+            raise ValueError("quadrant.growth_mid must be below growth_high")
+        keys = {f"{g}_{r}" for g in ("high", "mid", "low") for r in ("low", "high")}
+        if self.preferred not in keys:
+            raise ValueError(f"quadrant.preferred must be one of {sorted(keys)}")
+        return self
+
+
 class RobustnessConfig(_Model):
     """Spec v2 P1: half-life sensitivity and the overfitting warning."""
 
@@ -967,6 +1080,10 @@ class AppConfig(_Model):
     calibration: CalibrationConfig
     robustness: RobustnessConfig
     portfolio: PortfolioConfig
+    growth: GrowthConfig
+    risk_rating: RiskRatingConfig
+    quadrant: QuadrantConfig
+    risk_checklist: RiskChecklistConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:

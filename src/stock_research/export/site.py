@@ -28,6 +28,7 @@ from stock_research.analysis.scoring import DISCLAIMER as SCORE_DISCLAIMER
 from stock_research.analysis.stability import Gap
 from stock_research.analysis.technicals import DISPUTED
 from stock_research.analysis.weighting import WeightedStat
+from stock_research.calibration.summary import for_preference
 from stock_research.calibration.summary import load as load_calibration
 from stock_research.config import AppConfig
 from stock_research.data.errors import DataValidationError
@@ -255,20 +256,46 @@ def research_payload(
     calibration: dict[str, Any] | None,
     positive: tuple[frozenset[str], str] | None,
 ) -> dict[str, Any]:
-    """The 0-100 score per capital tier (spec v2 §4), only once the calibration passed."""
+    """The 0-100 score per capital tier (spec v2 §4) for every investor preference (成長 ×
+    風險 §1.4), each only once its calibration passed. The top level is the default
+    preference's, so readers that know no preferences keep working."""
     if calibration is None:
         return {"available": False, "reason": "全市場歷史校準尚未完成，分數暫不顯示"}
+    preferences = config.research_score.preferences
+    bases = rs.score_stock(market_data, a.data, a.stability, config, positive, a.growth_risk)
+    raw = a.data.prices.raw.dropna(subset=["close"])
+    price = float(raw["close"].iloc[-1])  # internal: positions and costs, never published
+    by_preference = {
+        key: {
+            "label": option.label,
+            **_preference_score(a, config, bases[key], for_preference(calibration, key), price),
+        }
+        for key, option in preferences.options.items()
+    }
+    return {
+        **by_preference[preferences.default],
+        "default_preference": preferences.default,
+        "preferences": by_preference,
+    }
+
+
+def _preference_score(
+    a: Analysis,
+    config: AppConfig,
+    base: rs.BaseScore,
+    calibration: dict[str, Any] | None,
+    price: float,
+) -> dict[str, Any]:
+    if calibration is None:
+        return {"available": False, "reason": "校準結果沒有這個投資人偏好（需重跑校準）"}
     if not calibration["passed"]:
         reason = calibration["gate"].get("reason") or "未通過"
         return {
             "available": False,
             "reason": f"分數未通過歷史校準門檻（{reason}），依規格不上線",
         }
-    base = rs.score_stock(market_data, a.data, a.stability, config, positive)
     if base.score is None:
         return {"available": False, "reason": base.problem}
-    raw = a.data.prices.raw.dropna(subset=["close"])
-    price = float(raw["close"].iloc[-1])  # internal: positions and costs, never published
     group = rs.group_of(base.score, calibration["cutoffs"])
     history = calibration["table"][group - 1]["out_of_sample"]
     tiers = rs.tier_scores(base, price, calibration, config)
@@ -493,9 +520,16 @@ def capital_label(capital: int, holdings: int) -> str:
 
 
 def _list_score(research: dict[str, Any]) -> dict[str, Any]:
-    """Every tier's score and label for the list (the page switches tiers), or why there is
-    none. The cap reason lets the capital page leave out stocks capped for doing worse than
-    the comparison ETF."""
+    """Every tier's score and label for the list (the page switches tiers and preferences),
+    or why there is none. The cap reason lets the capital page leave out stocks capped for
+    doing worse than the comparison ETF. The top level is the default preference's."""
+    entry = _list_tiers(research)
+    if research.get("preferences"):
+        entry["preferences"] = {k: _list_tiers(v) for k, v in research["preferences"].items()}
+    return entry
+
+
+def _list_tiers(research: dict[str, Any]) -> dict[str, Any]:
     if not research.get("available"):
         return {"available": False, "reason": research.get("reason")}
     return {

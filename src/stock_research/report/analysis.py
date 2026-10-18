@@ -157,7 +157,81 @@ def _summary(a: Analysis, shown: tuple[WindowName, ...], single: bool) -> list[s
     lines += [f"- 綜合分數：{scores}", f"- {SCORE_DISCLAIMER}", ""]
     if WindowName.POST_2020 in shown:
         lines += _plain_principles(a)
+    lines += _growth_risk(a)
     return lines
+
+
+def _growth_value(item) -> str:
+    if item.value is None:
+        return "—"
+    if item.key == "gross_margin_trend":
+        return f"{item.value * 100:+.2f} 個百分點／年"
+    return pct(item.value, 1)
+
+
+def _growth_risk(a: Analysis) -> list[str]:
+    """成長 × 風險: the last few years' actual growth (not a forecast)."""
+    g, r, q = a.growth_risk.growth, a.growth_risk.risk, a.growth_risk.quadrant
+    lines = [f"### 成長與風險（最近 {g.years} 年）", ""]
+    if q is not None:
+        preferred = "（資深股民偏好的組合）" if q.preferred else ""
+        lines += [f"- 象限：**{q.label}**{preferred}", ""]
+    score = f"{g.score:.0f}／100" if g.score is not None else f"無法計算（{g.problem}）"
+    lines += [f"- 成長分數：{score}。{g.note}", ""]
+    rows = [
+        [
+            item.name,
+            _growth_value(item),
+            "—" if item.score is None else f"{item.score * 100:.0f}",
+            item.detail,
+        ]
+        for item in g.items
+    ]
+    lines += table(["項目", "數值", "得分（0-100）", "計算期間與說明"], rows) + [""]
+    score = (
+        f"{r.score:.0f}／100（越高越危險）" if r.score is not None else f"無法計算（{r.problem}）"
+    )
+    lines += [f"- 風險分數：{score}。{r.note}"]
+    if r.week52 is not None:
+        lines.append(
+            f"- 從 52 週高點已跌 {r.week52.off_high:.1%}；一年內從低點漲了 "
+            f"{r.week52.rise_from_low:.1%}（原始收盤價，{r.week52.close_date}）。"
+        )
+    lines.append("")
+    rows = [
+        [
+            item.name,
+            "—" if item.danger is None else f"{item.danger * 100:.0f}",
+            item.detail,
+        ]
+        for item in r.items
+    ]
+    lines += table(["項目", "危險程度（0-100）", "計算期間與說明"], rows) + [""]
+    lines += _checklist(a.growth_risk.checklist)
+    return lines
+
+
+def _checklist_value(metric) -> str:
+    if metric.current is None:
+        return "—"
+    if metric.unit == "amount":
+        return f"{metric.current / 1e8:,.1f} 億元"
+    if metric.unit == "days":
+        return f"{metric.current:.0f} 天"
+    return pct(metric.current, 1)
+
+
+def _checklist(c) -> list[str]:
+    lines = [f"#### 風險檢查清單（{c.note}）", ""]
+    rows = []
+    for risk in c.risks:
+        if not risk.metrics:
+            rows.append([risk.name, "—（財報無法量化）", "—", "—", risk.qualitative])
+        for metric in risk.metrics:
+            trend = metric.direction + ("（風險升高的方向）" if metric.worsening else "")
+            rows.append([risk.name, metric.name, _checklist_value(metric), trend, risk.qualitative])
+    headers = ["風險", "量化指標", "目前值", f"近 {c.years} 年方向", "質化資訊（文件）"]
+    return lines + table(headers, rows) + [""]
 
 
 @dataclass(frozen=True)

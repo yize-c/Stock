@@ -1,0 +1,28 @@
+name: Probe ETF fees, issuers and terms
+
+# The user's answers 1b, 2b, 3a: ETF fees in TWSE open data, and the issuers' and the index
+# company's terms on automated access and reuse. Read from a GitHub runner. Read-only GET
+# requests without credentials; only public pages.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - scripts/probe_etf_terms.py
+      - .github/workflows/probe-etf-terms.yml
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: ETF fees, issuers and terms
+        run: |
+          pip install --quiet certifi
+          SSL_CERT_FILE="$(python -m certifi)" python scripts/probe_etf_terms.py

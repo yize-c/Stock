@@ -231,3 +231,12 @@ def test_report_says_which_metrics_count_for_consistency(analysis, config) -> No
     )
     none = render_analysis(replace(analysis, walk_forward=None), config)
     assert "尚無逐指標 walk-forward 結果" in none
+
+
+def test_growth_is_described_as_not_a_forecast(analysis, config) -> None:
+    text = render_analysis(analysis, config)
+    section = text.split("### 成長與風險（最近 3 年）")[1].split("## 2.")[0]
+    assert "成長分數：" in section and "不是預測" in section
+    assert "| 營收年複合成長率 |" in section and "| 毛利率趨勢 |" in section
+    assert "風險分數：" in section and "不是未來機率" in section
+    assert "| 過熱程度 |" in section and "| 獲利穩定性 |" in section
