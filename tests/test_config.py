@@ -264,3 +264,22 @@ def test_known_suspensions_parse_and_validate(raw_config, write_config) -> None:
     tw["known_suspensions"][0].update(end=date(2024, 3, 5), ticker="0050")
     with pytest.raises(ConfigError, match="ticker"):
         load_config(write_config(raw_config))
+
+
+def test_allocation_is_tentative_and_adds_up() -> None:
+    config = load_config(DEFAULT_CONFIG)
+    assert config.allocation.status == "暫定，待資深股民確認"
+    conservative = config.allocation.profiles["conservative"]
+    assert (conservative.mid_growth_low_risk, conservative.etf_0050) == (0.50, 0.30)
+
+
+def test_allocation_shares_must_add_up_to_one(raw_config, write_config) -> None:
+    raw_config["allocation"]["profiles"]["balanced"]["cash"] = 0.20
+    with pytest.raises(ConfigError, match="add up to 1"):
+        load_config(write_config(raw_config))
+
+
+def test_allocation_must_cover_every_preference(raw_config, write_config) -> None:
+    del raw_config["allocation"]["profiles"]["aggressive"]
+    with pytest.raises(ConfigError, match="every research_score preference"):
+        load_config(write_config(raw_config))

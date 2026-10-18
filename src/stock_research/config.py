@@ -1061,6 +1061,30 @@ class RobustnessConfig(_Model):
         return self
 
 
+class AllocationProfile(_Model):
+    """One preference's asset mix (成長 × 風險 §1.7); caps are upper limits, the rest fixed."""
+
+    mid_growth_low_risk: Fraction  # 中成長・低風險
+    etf_0050: Fraction
+    high_growth_mid_risk_max: Fraction  # 高成長・中風險, at most
+    high_growth_high_risk_max: Fraction  # 高成長・高風險, at most
+    cash: Fraction
+
+    @model_validator(mode="after")
+    def _check(self) -> AllocationProfile:
+        total = sum(self.model_dump().values())
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError(f"allocation shares must add up to 1 (got {total:.4f})")
+        return self
+
+
+class AllocationConfig(_Model):
+    """Asset allocation by investor preference (成長 × 風險 §1.7); tentative values."""
+
+    status: str  # shown wherever the mix is used, e.g. "暫定，待資深股民確認"
+    profiles: dict[str, AllocationProfile]
+
+
 class AppConfig(_Model):
     general: GeneralConfig
     markets: MarketsConfig
@@ -1084,6 +1108,7 @@ class AppConfig(_Model):
     risk_rating: RiskRatingConfig
     quadrant: QuadrantConfig
     risk_checklist: RiskChecklistConfig
+    allocation: AllocationConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:
@@ -1108,6 +1133,8 @@ class AppConfig(_Model):
             raise ValueError(f"industry groups used by frameworks are undefined: {used - groups}")
         if not getattr(self.markets, self.general.default_market).enabled:
             raise ValueError(f"default_market '{self.general.default_market}' is not enabled")
+        if set(self.allocation.profiles) != set(self.research_score.preferences.options):
+            raise ValueError("allocation.profiles must name every research_score preference")
         return self
 
 
