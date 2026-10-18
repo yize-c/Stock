@@ -5,10 +5,6 @@ name: Probe ETF and closes sources
 # credentials; only public pages.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - scripts/probe_etf_sources.py
-      - .github/workflows/probe-etf.yml
 
 permissions:
   contents: read

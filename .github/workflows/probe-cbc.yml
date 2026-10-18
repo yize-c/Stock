@@ -4,10 +4,6 @@ name: Probe CBC rate reader
 # development environment cannot reach cbc.gov.tw). Read-only, no credentials.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - scripts/probe_cbc.py
-      - .github/workflows/probe-cbc.yml
 
 permissions:
   contents: read

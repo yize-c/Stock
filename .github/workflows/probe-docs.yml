@@ -4,10 +4,6 @@ name: Probe FinMind docs
 # environment cannot reach it) and prints it. Read-only GET requests, no credentials.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - scripts/probe_finmind_docs.py
-      - .github/workflows/probe-docs.yml
 
 permissions:
   contents: read
