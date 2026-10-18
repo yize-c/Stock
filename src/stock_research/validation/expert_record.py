@@ -115,7 +115,8 @@ def render(record: dict[str, Any], comparisons: list[Comparison], run_date: date
         f"# 專家判斷與工具對照（{record.get('expert', '')}，紀錄日 {record.get('date')}）",
         "",
         f"- 對照日：{run_date}。紀錄與本對照都只能新增、不可修改；調整依據寫在下一次對照。",
-        "- 工具的成長分數以最近 3 年實際表現為參考，不是預測；風險分數為歷史統計值，不是未來機率。",
+        "- 工具的成長分數只描述最近 3 年已公告的實際表現，不是預測；"
+        "風險分數為歷史統計值，不是未來機率。",
         "",
     ]
     for c in comparisons:

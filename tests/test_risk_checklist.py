@@ -104,3 +104,22 @@ def test_documents_fill_the_qualitative_part() -> None:
     )
     politics = next(r for r in checklist.risks if r.key == "politics")
     assert politics.qualitative.startswith("海外營收")
+
+
+def test_yoy_volatility_never_bridges_a_missing_month() -> None:
+    values = [0.10, -0.10] * 18
+    values[-3] = float("nan")  # 2026-03 missing: windows ending 2026-03..2026-05 have a gap
+    checklist = rc.risk_checklist(_data(_quarterly(), _yoy(values)), SETTINGS)
+    volatility = next(
+        m for r in checklist.risks for m in r.metrics if m.key == "revenue_yoy_volatility"
+    )
+    assert "2026-02-28" in volatility.detail and "2026-05" not in volatility.detail
+
+
+def test_extreme_monthly_yoy_is_marked_for_manual_confirmation() -> None:
+    values = [0.10] * 35 + [6.0]  # +600% in the latest month
+    checklist = rc.risk_checklist(_data(_quarterly(), _yoy(values)), SETTINGS, yoy_flag=5.0)
+    volatility = next(
+        m for r in checklist.risks for m in r.metrics if m.key == "revenue_yoy_volatility"
+    )
+    assert "需人工確認" in volatility.detail

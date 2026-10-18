@@ -27,7 +27,7 @@ from stock_research.analysis.fundamentals import ttm_table
 from stock_research.analysis.inputs import StockData
 from stock_research.config import BandConfig, GrowthConfig
 
-NOT_A_FORECAST = "以最近 {years} 年的實際表現當作未來成長的參考，不是預測。"
+NOT_A_FORECAST = "只描述最近 {years} 年已公告的實際表現，不是預測。"
 ITEM_NAMES = {
     "revenue_cagr": "營收年複合成長率",
     "eps_cagr": "EPS 年複合成長率",
@@ -118,14 +118,20 @@ def eps_cagr(ttm: pd.DataFrame, as_of: date, years: int, s: BandConfig) -> Growt
     return GrowthItem("eps_cagr", value, band(value, s), detail)
 
 
-def revenue_yoy(yoy: pd.DataFrame, as_of: date, s: BandConfig) -> GrowthItem:
-    """``yoy``: period_end, available_date, yoy (from ``revenue.yoy_table``)."""
+def revenue_yoy(
+    yoy: pd.DataFrame, as_of: date, s: BandConfig, flag: float | None = None
+) -> GrowthItem:
+    """``yoy``: period_end, available_date, yoy (from ``revenue.yoy_table``). ``flag``: a YoY
+    beyond ±this is marked for manual confirmation by the data checks; the detail says so."""
     rows = _published(yoy, as_of).sort_values("period_end").tail(12)
     if len(rows) < 12 or rows["yoy"].isna().any():
         return GrowthItem("revenue_yoy", None, None, "近 12 個月的年增率不完整")
     value = float(rows["yoy"].astype(float).mean())
     months = _months(rows)
-    return GrowthItem("revenue_yoy", value, band(value, s), f"{months[0]}～{months[-1]}")
+    detail = f"{months[0]}～{months[-1]}"
+    if flag is not None and (rows["yoy"].astype(float).abs() > flag).any():
+        detail += f"；含年增率超過 ±{flag:.0%} 的月份（資料檢查標為需人工確認）"
+    return GrowthItem("revenue_yoy", value, band(value, s), detail)
 
 
 def gross_margin_trend(
@@ -143,20 +149,22 @@ def gross_margin_trend(
     ends = list(margins.index)
     x = np.array([(d - ends[0]).days / 365.25 for d in ends])
     slope = float(np.polyfit(x, margins.to_numpy(), 1)[0])
-    detail = (
-        f"{ends[0]}～{ends[-1]} 每年 {slope * 100:+.2f} 個百分點"
-        f"（{margins.iloc[0]:.1%} → {margins.iloc[-1]:.1%}）"
+    detail = (  # the fitted trend can differ from the two end points; both are shown
+        f"{ends[0]}～{ends[-1]} 最小平方趨勢每年 {slope * 100:+.2f} 個百分點"
+        f"；期初 {margins.iloc[0]:.1%}、期末 {margins.iloc[-1]:.1%}"
     )
     return GrowthItem("gross_margin_trend", slope, band(slope, s), detail)
 
 
-def growth_score(data: StockData, settings: GrowthConfig) -> GrowthScore:
+def growth_score(
+    data: StockData, settings: GrowthConfig, yoy_flag: float | None = None
+) -> GrowthScore:
     as_of, years = data.as_of, settings.lookback_years
     ttm = ttm_table(data.quarterly, data.basis, as_of)
     items = (
         revenue_cagr(data.revenue, as_of, years, settings.revenue_cagr),
         eps_cagr(ttm, as_of, years, settings.eps_cagr),
-        revenue_yoy(data.revenue_yoy, as_of, settings.revenue_yoy),
+        revenue_yoy(data.revenue_yoy, as_of, settings.revenue_yoy, yoy_flag),
         gross_margin_trend(
             ttm, as_of, years, settings.min_trend_points, settings.gross_margin_trend
         ),

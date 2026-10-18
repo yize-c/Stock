@@ -154,3 +154,28 @@ def test_growth_score_on_the_fixture_stock(raw_config, write_config) -> None:
     assert score.score is None or 0 <= score.score <= 100
     for item in score.items:
         assert item.score is None or 0 <= item.score <= 1
+
+
+def test_revenue_yoy_says_when_a_month_needs_manual_confirmation() -> None:
+    months = pd.period_range(end="2026-05", periods=12, freq="M")
+    yoy = pd.DataFrame(
+        {
+            "period_end": [m.end_time.date() for m in months],
+            "available_date": [(m + 1).start_time.date().replace(day=10) for m in months],
+            "yoy": [0.1] * 11 + [6.0],
+        }
+    )
+    item = g.revenue_yoy(yoy, AS_OF, SETTINGS.revenue_yoy, flag=5.0)
+    assert item.score is not None and "需人工確認" in item.detail
+    assert "需人工確認" not in g.revenue_yoy(yoy, AS_OF, SETTINGS.revenue_yoy).detail
+
+
+def test_financial_companies_have_no_interest_bearing_debt_ratio(raw_config, write_config) -> None:
+    raw_config["markets"]["tw"]["listing"]["overrides"] = [TSMC_LISTING]
+    config = load_config(write_config(raw_config))
+    md, _ = build_market_data(config)
+    plain = load_stock_data(md, "2330", md.today(), with_peers=False)
+    assert plain.quarterly["borrowings"].notna().any()
+    md.industry_groups = lambda industry: frozenset({"financial"})
+    bank = load_stock_data(md, "2330", md.today(), with_peers=False)
+    assert bank.quarterly["borrowings"].isna().all()  # not 0: banks fund outside those lines

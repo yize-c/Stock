@@ -62,8 +62,8 @@ def test_report_has_every_section_and_the_disclaimer(analysis, config) -> None:
         start=1,
     ):
         assert f"## {n}. {title}" in text
-    assert text.rstrip().endswith("綜合分數只描述符合這些投資人原則的程度，不是買賣建議。")
-    assert "本工具僅供研究，不構成投資建議。" in text
+    assert text.rstrip().endswith("本工具僅供研究，不構成投資建議。")  # the last line
+    assert "綜合分數只描述符合這些投資人原則的程度，不是買賣建議。" in text
     assert "https://goodinfo.tw/tw/StockDetail.asp?STOCK_ID=2330" in text
     assert "https://tw.stock.yahoo.com/quote/2330.TW" in text
     assert "不代表未來機率" in text

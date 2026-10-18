@@ -66,7 +66,8 @@ def assess(
         )
     except DataValidationError as exc:
         valuation = ValuationPosition({}, (), f"交易所本益比資料無法取得：{exc}")
-    growth = growth_score(data, config.growth)
+    yoy_flag = config.markets.tw.data_validation.revenue_yoy_abs_max
+    growth = growth_score(data, config.growth, yoy_flag)
     risk = risk_rating(
         data.prices.raw,
         data.prices.adjusted,
@@ -81,5 +82,5 @@ def assess(
         growth,
         risk,
         quadrant(growth.score, risk.score, config.quadrant),
-        risk_checklist(data, config.risk_checklist),
+        risk_checklist(data, config.risk_checklist, yoy_flag=yoy_flag),
     )

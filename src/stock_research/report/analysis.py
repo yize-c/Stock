@@ -174,7 +174,7 @@ def _growth_risk(a: Analysis) -> list[str]:
     g, r, q = a.growth_risk.growth, a.growth_risk.risk, a.growth_risk.quadrant
     lines = [f"### 成長與風險（最近 {g.years} 年）", ""]
     if q is not None:
-        preferred = "（資深股民偏好的組合）" if q.preferred else ""
+        preferred = "（資深股民偏好的組合；只描述分數落點，不是買賣建議）" if q.preferred else ""
         lines += [f"- 象限：**{q.label}**{preferred}", ""]
     score = f"{g.score:.0f}／100" if g.score is not None else f"無法計算（{g.problem}）"
     lines += [f"- 成長分數：{score}。{g.note}", ""]
@@ -206,7 +206,7 @@ def _growth_risk(a: Analysis) -> list[str]:
         ]
         for item in r.items
     ]
-    lines += table(["項目", "危險程度（0-100）", "計算期間與說明"], rows) + [""]
+    lines += table(["項目", "危險程度（0-100，歷史統計值）", "計算期間與說明"], rows) + [""]
     lines += _checklist(a.growth_risk.checklist)
     return lines
 
@@ -341,6 +341,7 @@ def _stability(a: Analysis, only_unstable: bool) -> list[str]:
             ],
             rows,
         )
+        lines += ["", "風險類項目（波動度、Beta、最大回撤、歷史 VaR）為歷史統計值，不是未來機率。"]
     else:
         lines.append("沒有結構轉變、不穩定或資料不足的項目。")
     lines += ["", "### 框架彙整", ""]
@@ -535,10 +536,13 @@ def _scorecard(
                 f"{WINDOW_LABEL[w]} {pct(by_window[w][framework].score, 0)}" for w in shown
             )
             lines += table(headers, rows) + ["", f"框架分數：{scores}", ""]
-            warnings = {
-                i.warning for w in shown for i in by_window[w][framework].items if i.warning
+            warnings = {  # each warning names its window: a V3 one is not about today
+                (WINDOW_LABEL[w], i.warning)
+                for w in shown
+                for i in by_window[w][framework].items
+                if i.warning
             }
-            lines += [f"> ⚠️ {text}" for text in sorted(warnings)]
+            lines += [f"> ⚠️ {label}：{text}" for label, text in sorted(warnings)]
             if warnings:
                 lines.append("")
     lines += ["### 綜合分數", ""]
@@ -579,6 +583,8 @@ def _item_cell(item) -> str:
         return "—"
     label = OUTCOME_LABEL[item.outcome.value]
     if item.outcome is Outcome.INFO:
+        if isinstance(item.value, str) and item.detail:  # a label, e.g. 虧損或轉機
+            return f"{item.value}（{item.detail}）"
         return item.detail or (str(item.value) if item.value is not None else "—")
     return (
         f"{label}（{item.detail}）" if item.detail and item.outcome is not Outcome.PASS else label
@@ -727,13 +733,13 @@ def _sources(a: Analysis) -> list[str]:
             lines.append(
                 f"- {WINDOW_LABEL[name]} 股價實際使用：{m.start} 至 {m.end}（{m.observations} 個交易日報酬）"
             )
-    lines += [f"- 產業：{a.data.industry}（同業 {_peer_count(a)} 家）", "- 資料來源限制："]
+    lines += [f"- 產業：{a.data.industry}（{_peer_count(a)}）", "- 資料來源限制："]
     lines += [f"  - {text}" for text in a.health.limitations]
     return lines + [""]
 
 
 def _peer_count(a: Analysis) -> str:
-    return "未載入" if a.data.peer_tables is None else str(len(a.data.peer_tables))
+    return "未載入同業" if a.data.peer_tables is None else f"同業 {len(a.data.peer_tables)} 家"
 
 
 def _appendix(a: Analysis) -> list[str]:
@@ -779,7 +785,7 @@ def render_analysis(
     lines += _links(a, config)
     lines += _sources(a)
     lines += _appendix(a)
-    lines += ["## 12. 免責聲明", "", ATTRIBUTION, DISCLAIMER, SCORE_DISCLAIMER, ""]
+    lines += ["## 12. 免責聲明", "", ATTRIBUTION, SCORE_DISCLAIMER, DISCLAIMER, ""]
     return "\n".join(lines)
 
 

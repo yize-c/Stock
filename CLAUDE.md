@@ -152,7 +152,7 @@
 - 無風險利率：一年期定存固定利率的央行五大銀行月平均（`a13rate`；2008-10 前成員含彰銀、之後為土銀），config 存 2003-01 ~ 2026-09（45 期）。程式每次執行讀央行檔（`data/fetchers/cbc.py`，標準函式庫解析 xlsx），與 config 重疊處必須一致、之後的月份接上；讀不到（開發環境）就用 config 並註明。最新一期最多沿用 62 天（`carry_forward_max_days`，輸出會註明），超過或中間缺月就報錯（使用者決定）。
 - 交易成本：`costs`（手續費 0.1425% 雙邊、最低 20 元、證交稅股票 0.3%／ETF 0.1% 賣出），`analysis/costs.py`；報酬比較一律扣一次來回成本（參考部位 `costs.reference_position`）。
 - 0050：`markets.tw.benchmark.compare_etf`，還原並扣 ETF 來回成本，與加權報酬指數、一年期定存並列（`analysis/returns.py`）。
-- push：探測腳本（`scripts/probe_*.py` 與探測流程）可直接 push 到工作分支；其他 push 先問使用者。
+- push：探測腳本（`scripts/probe_*.py` 與探測流程）可直接 push 到工作分支；其他 push 先問使用者。探測流程只用 `workflow_dispatch` 手動觸發（2026-10-18 起：merge #8 時 push 觸發讓 MOPS 與 ETF 條款探測又跑了一次），MOPS 探測流程已移除、只留腳本當紀錄。
 - token（使用者決定）：雲端容器沒有 `.env`，本機用雲端環境設定的環境變數、GitHub Actions 用 Secret；不印出、不寫進檔案或 commit。全市場校準用使用者另外申請的第二個免費 token（GitHub Secret `SECOND_FINMIND`），每日匯出仍用 `FINMIND_TOKEN`。
 - 公開網站（使用者決定，FinMind 條款：不可轉發原始資料、需標註 FinMind）：只放程式計算的結果（不放收盤價、金額等原始數字），網頁與報告附資料來源標註（`report/health.py` 的 `ATTRIBUTION`）。
 - 跨來源比對（walk-forward 69 次失敗的原因，使用者要求調查）：(1) 過去的 `as_of` 比對時，Yahoo 收盤已用今天以前的全部分割回溯調整 → 讀到今天並用 Yahoo 的分割倍數還原；(2) Yahoo 個別日期錯誤（多在 2024-03-29）→ 經證交所STOCK_DAY／櫃買 tradingStock 官方收盤確認後列入 `markets.tw.data_validation.known_source_errors`，該日不比對且 FinMind 必須等於官方收盤；清單外仍報錯。修正後 69 次全部通過。

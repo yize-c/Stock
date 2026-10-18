@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
+import numpy as np
 import pandas as pd
 
 from stock_research.analysis.frameworks.base import FrameworkInputs, PeerMedians
@@ -119,15 +120,21 @@ def load_stock_data(
         if progress:
             progress(f"{industry}: loading {len(peers)} peer(s)")
         tables = peer_tables(market_data, peers, as_of)
+    groups = market_data.industry_groups(industry)
+    quarterly = quarterly_table(market_data.financials(ticker, as_of), code)
+    if "financial" in groups and "borrowings" in quarterly:
+        # Banks and insurers fund themselves outside the borrowing lines, so a missing line
+        # is not "no debt": their interest-bearing-debt ratio has no value (not 0).
+        quarterly = quarterly.assign(borrowings=np.nan)
     return StockData(
         code=code,
         as_of=as_of,
         industry=industry,
-        groups=market_data.industry_groups(industry),
+        groups=groups,
         prices=market_data.prices(ticker, as_of),
         benchmark=market_data.benchmark(as_of),
         basis=market_data.share_basis(ticker, as_of),
-        quarterly=quarterly_table(market_data.financials(ticker, as_of), code),
+        quarterly=quarterly,
         revenue=revenue,
         revenue_yoy=yoy_table(code, revenue),
         dividends=market_data.dividends(ticker, as_of),

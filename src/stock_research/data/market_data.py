@@ -194,7 +194,8 @@ class MarketData:
             try:
                 fetched = self._cbc.rates()
             except SourceUnavailableError as exc:
-                rates = replace(rates, source=f"{rates.source}；央行檔本次無法讀取（{exc.actual}）")
+                kind = str(exc.actual).split(":", 1)[0][:40]  # e.g. ProxyError; not the URL
+                rates = replace(rates, source=f"{rates.source}；央行檔本次無法讀取（{kind}）")
             else:
                 extended = extend_with_cbc(rates.rates, fetched)
                 rates = replace(
