@@ -530,9 +530,9 @@ const Portfolio = (() => {
       const then = scoreAt(bought, capital);
       const current = scoreAt(now, capital);
       if (then !== null && current !== null && then - current >= a.score_drop) {
-        add("mid", "考慮減碼", `分數比買進時低 ${Math.round(then - current)} 分（${Math.round(then)} → ${Math.round(current)}）`);
+        add("mid", "考慮減碼", `條件符合度比買進時低 ${Math.round(then - current)} 分（${Math.round(then)} → ${Math.round(current)}）`);
       } else if (current !== null && current < a.score_floor) {
-        add("mid", "考慮減碼", `分數 ${Math.round(current)}，低於 ${a.score_floor}`);
+        add("mid", "考慮減碼", `條件符合度 ${Math.round(current)}，低於 ${a.score_floor}`);
       }
     }
     if (share !== null && share > a.concentration) {
@@ -743,7 +743,7 @@ const Portfolio = (() => {
       if (buy) {
         const why = [];
         if (missing > 0) {
-          why.push(`分數 ≥ ${rule.min_score} 且未被標示「${rule.excluded_cap_reason}」的股票只有 ${picked.length} 檔，少 ${missing} 檔`);
+          why.push(`條件符合度 ≥ ${rule.min_score} 且未被標示「${rule.excluded_cap_reason}」的股票只有 ${picked.length} 檔，少 ${missing} 檔`);
         }
         if (capLeft > EPS) why.push(`單一個股上限 ${pct(rule.max_weight)}，其餘部分`);
         fallback = { code: rule.fallback_etf, name: quote[0], price: quote[1], allotted, ...buy, reasons: why };

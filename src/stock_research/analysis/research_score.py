@@ -359,9 +359,9 @@ def label_for(score: float, settings: ResearchScoreConfig) -> tuple[str, str | N
 def tier_scores(
     base: BaseScore, price: float, calibration: dict[str, Any], config: AppConfig
 ) -> list[TierScore]:
-    """Final scores per capital tier; ``calibration`` must have passed its gate."""
+    """Final scores per capital tier (shown whether or not any validation passed)."""
     settings = config.research_score
-    assert base.score is not None and calibration["passed"]
+    assert base.score is not None
     group = group_of(base.score, calibration["cutoffs"])
     out = []
     for tier in settings.capital_tiers:

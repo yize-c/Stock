@@ -666,6 +666,32 @@ calibration:
   # the bottom group's and the rank correlation between group and return must reach this.
   groups: 10
   min_rank_correlation: 0.7
+  # 條件符合度 (user decision 2026-10-18): validation a (score vs the next 12 months' maximum
+  # drawdown) and b (vs the next 12 months' EPS and revenue growth, judged separately) pass
+  # when the top group beats the bottom group and the rank correlation of group and the
+  # groups' median outcome reaches this. The return calibration (c) above is recorded but no
+  # longer decides whether the score is shown.
+  validation_min_rank_correlation: 0.5
+  # Strategy backtest (user decisions 2026-10-18: quarterly; the lenient criteria): the
+  # `holdings` highest base scores among the liquid stocks, at most max_industry_share of them
+  # from one industry, equal weight, net of trading costs, against 0050 with dividends. The
+  # score needs V1 (from 2020) and full TTM, so it starts in 2021-06; 2022 falls in sample and
+  # 2025-04 out of sample.
+  strategy:
+    first_rebalance: 2021-06-30
+    last_rebalance: 2026-06-30
+    end: 2026-09-30
+    rebalance_months: 3
+    holdings: 10
+    max_industry_share: 0.30
+    out_of_sample_start: 2023-12-31
+    # Out of sample is under 3 years, so its rolling holding periods are 1 year.
+    rolling_years_out_of_sample: 1
+    rolling_years_full: 3
+    max_drawdown_ratio: 0.8  # drawdown at most 0.8 x 0050's
+    cagr_shortfall: 0.03  # annual return at least 0050's minus 3 percentage points
+    sharpe_shortfall: 0.0  # Sharpe at least 0050's
+    positive_share_shortfall: 0.0  # positive rolling periods at least 0050's share
   confidence: 0.95
   bootstrap_draws: 1000
   seed: 20211031

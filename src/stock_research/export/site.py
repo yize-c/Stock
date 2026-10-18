@@ -256,11 +256,12 @@ def research_payload(
     calibration: dict[str, Any] | None,
     positive: tuple[frozenset[str], str] | None,
 ) -> dict[str, Any]:
-    """The 0-100 score per capital tier (spec v2 §4) for every investor preference (成長 ×
-    風險 §1.4), each only once its calibration passed. The top level is the default
+    """The 條件符合度 (0-100) per capital tier (spec v2 §4) for every investor preference
+    (成長 × 風險 §1.4), with every validation's result next to it (user decision 2026-10-18:
+    shown even when none passed, then marked 僅供參考). The top level is the default
     preference's, so readers that know no preferences keep working."""
     if calibration is None:
-        return {"available": False, "reason": "全市場歷史校準尚未完成，分數暫不顯示"}
+        return {"available": False, "reason": "全市場歷史校準尚未完成，條件符合度暫不顯示"}
     preferences = config.research_score.preferences
     bases = rs.score_stock(market_data, a.data, a.stability, config, positive, a.growth_risk)
     raw = a.data.prices.raw.dropna(subset=["close"])
@@ -288,19 +289,20 @@ def _preference_score(
 ) -> dict[str, Any]:
     if calibration is None:
         return {"available": False, "reason": "校準結果沒有這個投資人偏好（需重跑校準）"}
-    if not calibration["passed"]:
-        reason = calibration["gate"].get("reason") or "未通過"
-        return {
-            "available": False,
-            "reason": f"分數未通過歷史校準門檻（{reason}），依規格不上線",
-        }
     if base.score is None:
         return {"available": False, "reason": base.problem}
     group = rs.group_of(base.score, calibration["cutoffs"])
     history = calibration["table"][group - 1]["out_of_sample"]
     tiers = rs.tier_scores(base, price, calibration, config)
+    validations = validation_summaries(calibration)
+    validated = bool(calibration.get("passed_any"))
     return {
         "available": True,
+        "name": SCORE_NAME,
+        "aim": SCORE_AIM,
+        "validated": validated,
+        "validation_note": None if validated else NOT_VALIDATED,
+        "validations": validations,
         "default_capital": config.research_score.default_capital,
         "base": base.score,
         "group": group,
@@ -342,6 +344,65 @@ def _preference_score(
         ],
         "disclaimer": rs.DISCLAIMER,
     }
+
+
+SCORE_NAME = "條件符合度"
+SCORE_AIM = "追求比 0050 抗跌"
+NOT_VALIDATED = "未通過任何驗證，僅供參考"
+VALIDATION_NAMES = {
+    "drawdown": "回撤較小",
+    "eps_growth": "EPS 成長",
+    "revenue_growth": "營收成長",
+    "strategy": "策略回測",
+    "returns": "報酬（僅記錄）",
+}
+
+
+def validation_summaries(calibration: dict[str, Any]) -> list[dict[str, Any]]:
+    """Each validation's result as the site shows it: name, passed, what it tested, and the
+    values and periods (formatted here; the page only lays them out)."""
+    out = []
+    oos = calibration["base_dates"]
+    period = (
+        f"樣本外基準日 {oos['out_of_sample_start']}～{oos['last']}，每月 {calibration['groups']} 組"
+    )
+    for key, check in (calibration.get("validations") or {}).items():
+        lines = [check.get("label", "")]
+        if key == "strategy":
+            for test in (check.get("criteria") or {}).values():
+                mark = "通過" if test["passed"] else "未通過"
+                lines.append(f"{test['name']}：{mark}（{test['detail']}）")
+            periods = check.get("periods") or {}
+            if "out_of_sample" in periods:
+                p = periods["out_of_sample"]["strategy"]
+                lines.append(f"樣本外期間 {p['start']}～{p['end']}；歷史回測，不代表未來。")
+            if (check.get("overfit") or {}).get("warning"):
+                lines.append("樣本內明顯優於樣本外，可能過度擬合；以樣本外結果為準。")
+        else:
+            lines.append(period)
+            rho = check.get("rank_correlation")
+            if rho is not None:
+                need = check.get("min_rank_correlation")
+                lines.append(f"分數組與結果的等級相關 {rho:.2f}（門檻 {need:g}）")
+            if key == "returns":
+                lines.append("只記錄、不作為上線條件；歷史回測平均，不是預期報酬。")
+            elif check.get("top_median") is not None:
+                lines.append(
+                    f"最高分組中位數 {check['top_median']:+.1%}、"
+                    f"最低分組 {check['bottom_median']:+.1%}"
+                )
+        if check.get("reason"):
+            lines.append(f"未通過原因：{check['reason']}")
+        out.append(
+            {
+                "key": key,
+                "name": VALIDATION_NAMES.get(key, key),
+                "passed": bool(check.get("passed")),
+                "gating": bool(check.get("gating")),
+                "lines": [line for line in lines if line],
+            }
+        )
+    return out
 
 
 def stock_payload(

@@ -172,7 +172,7 @@ def test_web_app_is_dark_only_and_cache_is_versioned() -> None:
     manifest = json.loads((web / "manifest.webmanifest").read_text(encoding="utf-8"))
     assert manifest["background_color"] == manifest["theme_color"] == "#0a0a0b"
     sw = (web / "sw.js").read_text(encoding="utf-8")
-    assert 'const CACHE = "stock-v3";' in sw  # bumped with the holdings scripts
+    assert 'const CACHE = "stock-v4";' in sw  # bumped with the 條件符合度 page
     for script in re.findall(r'<script src="([^"]+)"', html):
         assert f'"{script}"' in sw  # every script is in the offline shell
     css = (web / "style.css").read_text(encoding="utf-8")
@@ -204,7 +204,22 @@ def _calibration(passed: bool) -> dict:
             str(t): {str(g): {"cap": None, "reason": None} for g in range(1, 11)} for t in tiers
         },
     }
-    aggressive = per | {"passed": False, "gate": {"passed": False, "reason": "等級相關太低"}}
+    checks = {
+        "drawdown": {
+            "label": "之後 12 個月的最大回撤", "gating": True, "passed": passed,
+            "rank_correlation": 0.8 if passed else 0.1, "min_rank_correlation": 0.5,
+            "top_median": -0.12, "bottom_median": -0.25,
+            "reason": None if passed else "分數組與之後 12 個月的最大回撤的等級相關 0.10，低於 0.5",
+        },
+        "returns": {
+            "label": "之後 12 個月的報酬（扣交易成本，平均）", "gating": False,
+            "passed": False, "rank_correlation": -0.36, "min_rank_correlation": 0.7,
+            "reason": "分數組與報酬的等級相關 -0.36，低於 0.7",
+        },
+    }  # fmt: skip
+    per |= {"validations": checks, "passed_any": passed}
+    failing = {k: v | {"passed": False} for k, v in checks.items()}
+    aggressive = per | {"validations": failing, "passed_any": False}
     return {
         **per,
         "default_preference": "conservative",
@@ -221,7 +236,8 @@ def _calibration(passed: bool) -> dict:
 
 
 def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) -> None:
-    """The 0-100 score appears only once the calibration passed (spec v2 §4.2)."""
+    """The 條件符合度 appears with every validation's result; none passed -> 僅供參考
+    (user decision 2026-10-18, replacing "not published until the calibration passed")."""
     from stock_research.calibration.summary import save
 
     metrics = tmp_path / "metric_walk_forward.json"
@@ -241,12 +257,16 @@ def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) 
 
     export_site(md, config, tmp_path / "a")  # no calibration yet
     research = _read(tmp_path / "a" / "data" / "stocks" / "2330.json")["research_score"]
-    assert research == {"available": False, "reason": "全市場歷史校準尚未完成，分數暫不顯示"}
+    assert research == {"available": False, "reason": "全市場歷史校準尚未完成，條件符合度暫不顯示"}
 
     save(_calibration(False), config.calibration.output)
     export_site(md, config, tmp_path / "b")
     research = _read(tmp_path / "b" / "data" / "stocks" / "2330.json")["research_score"]
-    assert not research["available"] and "不上線" in research["reason"]
+    assert research["available"] and research["name"] == "條件符合度"
+    assert not research["validated"] and research["validation_note"] == "未通過任何驗證，僅供參考"
+    assert research["aim"] == "追求比 0050 抗跌"
+    drawdown = next(v for v in research["validations"] if v["key"] == "drawdown")
+    assert not drawdown["passed"] and any("未通過原因" in line for line in drawdown["lines"])
 
     passed = _calibration(True) | {"overfit": {"warning": True, "message": "可能過度擬合"}}
     save(passed, config.calibration.output)
@@ -258,7 +278,13 @@ def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) 
     # 成長 × 風險 §1.4: one score per investor preference, each calibrated on its own.
     prefs = research["preferences"]
     assert research["default_preference"] == "conservative" and prefs["conservative"]["available"]
-    assert prefs["balanced"]["label"] == "平衡" and not prefs["aggressive"]["available"]
+    assert research["validated"] and research["validation_note"] is None
+    names = {v["key"]: v for v in research["validations"]}
+    assert names["drawdown"]["passed"] and names["drawdown"]["name"] == "回撤較小"
+    assert not names["returns"]["gating"] and names["returns"]["name"] == "報酬（僅記錄）"
+    assert any("不是預期報酬" in line for line in names["returns"]["lines"])
+    assert prefs["balanced"]["label"] == "平衡" and prefs["aggressive"]["available"]
+    assert not prefs["aggressive"]["validated"]
     assert {p["name"] for p in prefs["balanced"]["parts"]} >= {
         "成長（最近 3 年）",
         "低風險（100 − 風險分數）",
@@ -278,7 +304,7 @@ def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) 
     row = index["stocks"][0]
     default = next(t for t in research["tiers"] if t["capital"] == 300000)
     assert default["capital_label"] == "30 萬・5 檔"
-    assert not row["score"]["preferences"]["aggressive"]["available"]
+    assert row["score"]["preferences"]["aggressive"]["available"]
     assert row["score"]["available"] and set(row["score"]["tiers"]) == {
         "50000", "300000", "1000000", "3000000",
     }  # fmt: skip
@@ -287,3 +313,17 @@ def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) 
         "label": default["label"],
         "cap_reason": default["cap_reason"],
     }
+
+
+def test_the_site_never_promises_and_never_says_buy() -> None:
+    """User decision 2026-10-18: 追求比 0050 抗跌; no 穩賺 / 保證; no buying words beside the
+    條件符合度 (the holdings pages record the user's own buys, which is not advice)."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "web"
+    for path in root.iterdir():
+        if path.suffix in {".js", ".html", ".css", ".json", ".webmanifest"}:
+            text = path.read_text(encoding="utf-8")
+            assert "穩賺" not in text and "保證" not in text, path.name
+    app = (root / "app.js").read_text(encoding="utf-8")
+    assert "買進" not in app and "追求比 0050 抗跌" in app

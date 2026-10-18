@@ -23,6 +23,12 @@
 
 * Investor preferences (成長 × 風險 §1.4): every step above runs once per preference on that
   preference's base score; the top-level fields repeat the default preference's.
+* 條件符合度 validations (user decision 2026-10-18), on the same groups and periods: a, the
+  next 12 months' maximum drawdown; b, the next 12 months' EPS growth and revenue growth
+  (separately). Each uses the groups' median outcome (growth rates have long tails); it
+  passes when the top group's out-of-sample median beats the bottom group's and the rank
+  correlation of group and median reaches ``validation_min_rank_correlation``. The return
+  gate above (c) is recorded as a validation that decides nothing; the caps stay.
 
 Historical statistics only; not forecasts and not investment advice.
 """
@@ -38,13 +44,19 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 
-from stock_research.calibration.pipeline import forward_gross, tier_net
+from stock_research.calibration.pipeline import OUTCOME_COLUMNS, forward_gross, tier_net
 from stock_research.config import AppConfig, add_months
 from stock_research.data.errors import DataValidationError
 from stock_research.data.market_data import MarketData
 from stock_research.validation.statistics import block_bootstrap, overfit_check
 
-SCHEMA_VERSION = 2  # 2: one calibration per investor preference
+SCHEMA_VERSION = 3  # 2: one calibration per investor preference; 3: 條件符合度 validations
+# key -> (row column, what is measured, what "better" means for a higher score)
+VALIDATIONS = {
+    "drawdown": ("mdd_fwd", "之後 12 個月的最大回撤", "高分組的回撤較小"),
+    "eps_growth": ("eps_growth_fwd", "之後 12 個月的 EPS 年增率", "高分組的 EPS 成長較好"),
+    "revenue_growth": ("revenue_growth_fwd", "之後 12 個月的營收年增率", "高分組的營收成長較好"),
+}
 DISCLAIMER = (
     "歷史回測平均（扣交易成本），不代表未來，不構成投資建議。本工具僅供研究，不構成投資建議。"
 )
@@ -85,21 +97,25 @@ def assign_groups(scored: pd.DataFrame, groups: int) -> pd.DataFrame:
     return out
 
 
-def _stats(values: np.ndarray, blocks: np.ndarray, config: AppConfig, rng) -> dict[str, Any]:
+def _stats(
+    values: np.ndarray, blocks: np.ndarray, config: AppConfig, rng, statistic: str = "mean"
+) -> dict[str, Any]:
+    """n, the ``statistic`` (mean or median) and its block-bootstrap interval."""
     settings = config.calibration
+    measure = np.mean if statistic == "mean" else np.median
     finite = np.isfinite(values)
     values, blocks = values[finite], blocks[finite]
     if len(values) == 0:
-        return {"n": 0, "mean": None, "ci_low": None, "ci_high": None}
+        return {"n": 0, statistic: None, "ci_low": None, "ci_high": None}
     ids = pd.factorize(blocks)[0]
     draws = block_bootstrap(
-        ids, lambda idx: float(values[idx].mean()), settings.bootstrap_draws, rng
+        ids, lambda idx: float(measure(values[idx])), settings.bootstrap_draws, rng
     )
     tail = (1 - settings.confidence) / 2
     ok = draws[np.isfinite(draws)]
     return {
         "n": int(len(values)),
-        "mean": float(values.mean()),
+        statistic: float(measure(values)),
         "ci_low": float(np.quantile(ok, tail)) if ok.size else None,
         "ci_high": float(np.quantile(ok, 1 - tail)) if ok.size else None,
     }
@@ -116,7 +132,10 @@ def summarize(
     config: AppConfig,
     now: datetime,
     extra: dict[str, Any] | None = None,
+    strategies: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """``strategies``: each preference's strategy backtest (``backtest.run``), a gating
+    validation like a and b."""
     settings = config.calibration
     preferences = config.research_score.preferences
     missing = [k for k in preferences.options if f"score_{k}" not in rows]
@@ -125,10 +144,24 @@ def summarize(
             f"rows have no score for preference(s) {missing}: they were scored with an older "
             "score definition; run the score stage again"
         )
+    no_outcome = [c for c in OUTCOME_COLUMNS if c not in rows]
+    if no_outcome:
+        raise RowsError(
+            f"rows have no {no_outcome}: they were scored before the 條件符合度 validations; "
+            "run the score stage again"
+        )
+    # The strategy's later rebalances are scored too; the calibration stops at last_base_date.
+    calibration_rows = rows.loc[[d <= settings.last_base_date for d in rows["base_date"]]]
     per = {
-        key: _calibrate(rows.assign(score=rows[f"score_{key}"]), bench, config)
+        key: _calibrate(calibration_rows.assign(score=rows[f"score_{key}"]), bench, config)
         for key in preferences.options
     }
+    for key, entry in per.items():
+        if strategies is not None and key in strategies:
+            entry["validations"]["strategy"] = strategies[key]
+        entry["passed_any"] = any(
+            v["passed"] for v in entry["validations"].values() if v.get("gating")
+        )
     default = per[preferences.default]
     status_counts = rows["status"].value_counts().to_dict()
     return {
@@ -152,7 +185,19 @@ def summarize(
             **(extra or {}),
         },
         "default_preference": preferences.default,
-        **{k: default[k] for k in ("passed", "gate", "overfit", "cutoffs", "table", "caps")},
+        **{
+            k: default[k]
+            for k in (
+                "passed",
+                "gate",
+                "overfit",
+                "cutoffs",
+                "table",
+                "caps",
+                "validations",
+                "passed_any",
+            )
+        },  # fmt: skip
         "preferences": per,
         "limitations": [
             "未做 FinMind 與 Yahoo 的收盤價交叉比對（Yahoo 沒有已下市股票）；其餘資料檢查照常。",
@@ -239,6 +284,16 @@ def _calibrate(rows: pd.DataFrame, bench: pd.DataFrame, config: AppConfig) -> di
 
     gate = _gate(table, str(score_settings.default_capital), config)
     overfit = _overfit(table, str(score_settings.default_capital), config)
+    validations: dict[str, dict[str, Any]] = {
+        key: _validation(scored, column, label, better, config, rng)
+        for key, (column, label, better) in VALIDATIONS.items()
+    }
+    validations["returns"] = {  # c: recorded, decides nothing (the caps still apply)
+        **gate,
+        "label": "之後 12 個月的報酬（扣交易成本，平均）",
+        "better": "高分組的報酬較高",
+        "gating": False,
+    }
     oos = scored.loc[scored["period"] == "out_of_sample"]
     quantiles = np.arange(1, settings.groups) / settings.groups
     monthly = oos.groupby("base_date")["score"].quantile(quantiles).unstack()
@@ -246,12 +301,64 @@ def _calibrate(rows: pd.DataFrame, bench: pd.DataFrame, config: AppConfig) -> di
     return {
         "passed": gate["passed"],
         "gate": gate,
+        "validations": validations,
         "overfit": overfit,
         "cutoffs": cutoffs,
         "table": table,
         "caps": caps,
         "scored_rows": int(len(scored)),
         "with_outcome": int(scored["gross"].notna().sum()),
+    }
+
+
+def _validation(
+    scored: pd.DataFrame, column: str, label: str, better: str, config: AppConfig, rng
+) -> dict[str, Any]:
+    """Validation a or b: the groups' median ``column``, and whether a higher score group
+    has the better (higher) median out of sample."""
+    settings = config.calibration
+    table = []
+    for group in range(1, settings.groups + 1):
+        entry: dict[str, Any] = {"group": group}
+        for period in ("in_sample", "out_of_sample"):
+            part = scored.loc[(scored["group"] == group) & (scored["period"] == period)]
+            entry[period] = {
+                "months": int(part["base_date"].nunique()),
+                **_stats(
+                    part[column].to_numpy(dtype=float),
+                    part["block"].to_numpy(),
+                    config,
+                    rng,
+                    statistic="median",
+                ),
+            }
+        table.append(entry)
+    out = {
+        "label": label,
+        "better": better,
+        "gating": True,
+        "measure": "median",
+        "min_rank_correlation": settings.validation_min_rank_correlation,
+        "table": table,
+    }
+    medians = [e["out_of_sample"]["median"] for e in table]
+    if any(m is None for m in medians) or len(medians) < 2:
+        return out | {"passed": False, "reason": "樣本外有分數組沒有資料"}
+    rho = float(spearmanr(range(1, len(medians) + 1), medians).statistic)
+    top_beats_bottom = medians[-1] > medians[0]
+    reason = None
+    if not top_beats_bottom:
+        reason = "最高分組的樣本外中位數沒有優於最低分組"
+    elif rho < settings.validation_min_rank_correlation:
+        reason = (
+            f"分數組與{label}的等級相關 {rho:.2f}，低於 {settings.validation_min_rank_correlation}"
+        )
+    return out | {
+        "passed": bool(top_beats_bottom and rho >= settings.validation_min_rank_correlation),
+        "reason": reason,
+        "rank_correlation": rho,
+        "top_median": medians[-1],
+        "bottom_median": medians[0],
     }
 
 

@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 from stock_research.analysis.costs import net_return, position_shares
+from stock_research.analysis.fundamentals import ttm_table
 from stock_research.analysis.growth_risk import assess
 from stock_research.analysis.inputs import load_stock_data
 from stock_research.analysis.research_score import score_stock
@@ -44,6 +45,8 @@ from stock_research.validation.metric_walk_forward import positive_metrics
 LIQUIDITY_FILE = "liquidity.parquet"
 FETCH_STATUS_FILE = "fetch_status.json"
 PART_KEYS = ("principles", "consistency", "growth", "safety", "chips")
+# Next-``horizon_months`` outcomes of the 條件符合度 validations: a, then b (EPS, revenue).
+OUTCOME_COLUMNS = ("mdd_fwd", "eps_growth_fwd", "revenue_growth_fwd")
 # A listed stock whose newest TaiwanStockInfo row is older than this is no longer listed.
 _STALE_INFO_DAYS = 30
 # A close used for a base date or a horizon end must be this recent.
@@ -51,7 +54,15 @@ _MAX_STALE_DAYS = 10
 
 
 def base_dates(settings: CalibrationConfig) -> list[date]:
-    return [d.date() for d in pd.date_range(settings.start, settings.last_base_date, freq="ME")]
+    """Every month end that is screened and scored: the calibration's (to last_base_date)
+    and the strategy backtest's later rebalances."""
+    last = max(settings.last_base_date, settings.strategy.last_rebalance)
+    return [d.date() for d in pd.date_range(settings.start, last, freq="ME")]
+
+
+def calibration_dates(settings: CalibrationConfig) -> list[date]:
+    """The base dates whose next ``horizon_months`` have passed: the calibration's."""
+    return [d for d in base_dates(settings) if d <= settings.last_base_date]
 
 
 def calibration_market(config: AppConfig, *, wait_on_quota: bool = True) -> MarketData:
@@ -214,6 +225,72 @@ def forward_gross(
     return stop[1] / start[1] - 1.0, inside_delisting
 
 
+def forward_drawdown(
+    adjusted: pd.Series, base: date, months: int, delisted: date | None
+) -> float | None:
+    """Maximum drawdown (≤ 0) of the adjusted closes from ``base`` to ``base + months``
+    (validation a); a stock delisted inside the horizon counts until its last close."""
+    end = add_months(base, months)
+    start = _close_on_or_before(adjusted, base)
+    if start is None or (base - start[0]).days > _MAX_STALE_DAYS:
+        return None
+    window = adjusted.loc[[start[0] <= d <= end for d in adjusted.index]]
+    if len(window) < 2:
+        return None
+    inside_delisting = delisted is not None and delisted <= end
+    if not inside_delisting and (end - window.index[-1]).days > _MAX_STALE_DAYS:
+        return None  # no close near the horizon end (a long halt): no outcome
+    values = window.to_numpy(dtype=float)
+    return float((values / np.maximum.accumulate(values) - 1.0).min())
+
+
+def _latest_ttm_eps(ttm: pd.DataFrame, day: date) -> tuple[date, float] | None:
+    known = ttm.loc[
+        [a is not None and not pd.isna(a) and a <= day for a in ttm["available_date"]]
+    ].dropna(subset=["eps"])
+    if known.empty:
+        return None
+    row = known.sort_values("period_end").iloc[-1]
+    return row["period_end"], float(row["eps"])
+
+
+def forward_eps_growth(ttm: pd.DataFrame, base: date, months: int, last: date) -> float | None:
+    """Growth of the TTM EPS known ``months`` after ``base`` over the TTM EPS known at
+    ``base`` (validation b; one share basis); none when the earlier EPS is not positive."""
+    end = add_months(base, months)
+    if end > last or ttm.empty:
+        return None
+    before, after = _latest_ttm_eps(ttm, base), _latest_ttm_eps(ttm, end)
+    if before is None or after is None or after[0] <= before[0] or before[1] <= 0:
+        return None
+    return after[1] / before[1] - 1.0
+
+
+def forward_revenue_growth(
+    revenue: pd.DataFrame, base: date, months: int, last: date
+) -> float | None:
+    """Revenue of the ``months`` months after ``base``'s month over the ``months`` months up
+    to it (validation b); none unless every month is reported by ``last``."""
+    if revenue.empty:
+        return None
+    known = revenue.loc[
+        [a is not None and not pd.isna(a) and a <= last for a in revenue["available_date"]]
+    ]
+    series = pd.Series(
+        known["value"].astype(float).to_numpy(),
+        index=pd.PeriodIndex(pd.to_datetime(known["period_end"]), freq="M"),
+    )
+    month = pd.Period(base, freq="M")
+    after = pd.period_range(month + 1, month + months, freq="M")
+    before = pd.period_range(month - months + 1, month, freq="M")
+    if not set(after) | set(before) <= set(series.index):
+        return None
+    total_before = float(series[before].sum())
+    if total_before <= 0:
+        return None
+    return float(series[after].sum()) / total_before - 1.0
+
+
 def tier_net(
     gross: float | None, price: float | None, capital: int, holdings: int, etf: bool, config
 ) -> float:
@@ -259,6 +336,12 @@ def score_shard(
         later = market_data.prices(ticker, last_day)
         adjusted = later.adjusted.set_index("date")["adj_close"].dropna().astype(float)
         raw = later.raw.set_index("date")["close"].dropna().astype(float)
+        try:  # the statements as finally published, for the forward growth outcomes
+            final = load_stock_data(market_data, code, last_day, with_peers=False)
+            final_ttm = ttm_table(final.quarterly, final.basis, last_day)
+            final_revenue = final.revenue
+        except (DataValidationError, ValueError, KeyError):
+            final_ttm, final_revenue = pd.DataFrame(), pd.DataFrame()
         progress(f"{code} ({n + 1}/{len(codes)}): {len(dates)} base dates")
         for base in dates:
             row: dict[str, Any] = {"code": code, "base_date": base}
@@ -270,9 +353,8 @@ def score_shard(
             except (DataValidationError, ValueError, KeyError) as exc:
                 rows.append(row | {"status": "ERROR", "reason": f"{type(exc).__name__}: {exc}"})
                 continue
-            gross, delisted_inside = forward_gross(
-                adjusted, base, settings.horizon_months, delisted.get(code)
-            )
+            horizon = settings.horizon_months
+            gross, delisted_inside = forward_gross(adjusted, base, horizon, delisted.get(code))
             close = _close_on_or_before(raw, base)
             price = close[1] if close else None  # used for position sizes, never written
             score = scores[preferences.default]
@@ -285,6 +367,11 @@ def score_shard(
                 "growth_score": growth_risk.growth.score,
                 "risk_score": growth_risk.risk.score,
                 "gross": gross,
+                "mdd_fwd": forward_drawdown(adjusted, base, horizon, delisted.get(code)),
+                "eps_growth_fwd": forward_eps_growth(final_ttm, base, horizon, last_day),
+                "revenue_growth_fwd": forward_revenue_growth(
+                    final_revenue, base, horizon, last_day
+                ),
                 "delisted_in_horizon": delisted_inside,
                 **{
                     f"net_{t.capital}": tier_net(gross, price, t.capital, t.holdings, False, config)
@@ -296,7 +383,7 @@ def score_shard(
         "code", "base_date", "status", "reason", "score",
         *[f"score_{k}" for k in preferences.options],
         *[f"part_{k}" for k in PART_KEYS], "growth_score", "risk_score",
-        "gross", "delisted_in_horizon", *[f"net_{t.capital}" for t in tiers],
+        "gross", *OUTCOME_COLUMNS, "delisted_in_horizon", *[f"net_{t.capital}" for t in tiers],
     ]  # fmt: skip
     return pd.DataFrame(rows).reindex(columns=columns)
 

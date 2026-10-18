@@ -15,7 +15,7 @@ const LEGEND = [
   "穩定：前後一致。結構轉變：2020 後換了樣子，但新樣子本身穩定。",
   "不穩定：一直在變，歷史數字參考價值低。資料不足：無法判斷。",
   "整體判定取所有項目（含框架條件）中最差的一個，所以多半是不穩定；列表改看營收、獲利、風險三個面向。",
-  "分數只描述符合條件的程度與歷史回測平均，不是買賣建議。",
+  "條件符合度（0–100）只描述符合條件的程度，追求比 0050 抗跌；不是買賣建議，不代表未來。",
 ];
 const CHEVRON = '<svg class="chev" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
@@ -132,7 +132,7 @@ function scoreCell(stock) {
   }
   const score = stock.score;
   const tier = score && score.available ? score.tiers[String(state.capital)] : null;
-  if (!tier) return `<span class="off" title="${esc(score ? score.reason : "")}">未上線</span>`;
+  if (!tier) return `<span class="off" title="${esc(score ? score.reason : "")}">暫無</span>`;
   return `<b>${Math.round(tier.value)}</b><small>${esc(tier.label)}</small>`;
 }
 function dots(stock) {
@@ -256,13 +256,24 @@ function heroHTML(s) {
   const r = s.research_score;
   const composite = `<p class="small muted">投資大師原則 V1 ${pct(s.composite.V1)}・V3 ${pct(s.composite.V3)}</p>`;
   if (!r || !r.available) {
-    return `<section class="hero"><div class="scoreline"><span class="big muted">—</span><span class="label muted">分數未上線</span></div>
-      <p class="small muted">${esc(r ? r.reason : "沒有分數資料")}</p>${composite}</section>`;
+    return `<section class="hero"><div class="scoreline"><span class="big muted">—</span><span class="label muted">條件符合度暫不顯示</span></div>
+      <p class="small muted">${esc(r ? r.reason : "沒有條件符合度資料")}</p>${composite}</section>`;
   }
   const tier = currentTier(r);
-  const warnings = (r.notes || []).map((n) => `<p class="warn"><i class="dot"></i><span>${esc(n)}</span></p>`).join("");
-  return `<section class="hero"><div class="scoreline"><span class="big">${Math.round(tier.score)}</span><span class="label">${esc(tier.label)}</span></div>
-    <p class="small muted">本金 ${esc(tier.capital_label)}・歷史回測參考，非投資建議</p>${composite}${warnings}</section>`;
+  const notes = (r.validated ? [] : [r.validation_note]).concat(r.notes || []);
+  const warnings = notes.map((n) => `<p class="warn"><i class="dot"></i><span>${esc(n)}</span></p>`).join("");
+  return `<section class="hero"><div class="scoreline"><span class="big">${Math.round(tier.score)}</span><span class="label">${esc(r.name)}・${esc(tier.label)}</span></div>
+    <p class="small muted">本金 ${esc(tier.capital_label)}・${esc(r.aim)}，不是買賣建議</p>${checksHTML(r)}${composite}${warnings}</section>`;
+}
+
+// Each validation's result (computed by the export; the page only shows it).
+function checksHTML(r) {
+  return `<p class="checks">${(r.validations || []).map((v) =>
+    `<span class="check ${v.passed ? "ok" : "no"}"><i class="dot"></i>${esc(v.name)}</span>`).join("")}</p>`;
+}
+function validationsHTML(r) {
+  return (r.validations || []).map((v) => `<details class="fw"><summary><span class="grow"><i class="dot ${v.passed ? "v-STABLE" : "v-UNSTABLE"}"></i> ${esc(v.name)}</span><span class="val">${v.passed ? "通過" : "未通過"}${v.gating ? "" : "・不列入"}</span>${CHEVRON}</summary>
+    <p class="small">${v.lines.map(esc).join("<br>")}</p></details>`).join("");
 }
 
 function scoreBody(s) {
@@ -271,7 +282,7 @@ function scoreBody(s) {
     ["", ...WINDOWS.map((w) => WINDOW_LABEL[w])],
     [["投資大師原則（綜合分數）", ...WINDOWS.map((w) => pct(s.composite[w]))]]
   ) + (s.composite_notes.length ? `<p class="small muted">${s.composite_notes.map(esc).join("<br>")}</p>` : "");
-  if (!r || !r.available) return `<p class="muted">${esc(r ? r.reason : "沒有分數資料")}</p>${composite}`;
+  if (!r || !r.available) return `<p class="muted">${esc(r ? r.reason : "沒有條件符合度資料")}</p>${composite}`;
   const cal = r.calibration;
   const rows = r.tiers.map((t) => [
     esc(t.capital_label),
@@ -284,8 +295,11 @@ function scoreBody(s) {
   ]);
   const parts = r.parts.map((p) => [esc(p.name), p.points === null ? "—" : `${p.points.toFixed(1)} / ${p.max}`, esc(p.detail)]);
   const notes = r.tiers.filter((t) => t.label_note).map((t) => `${esc(t.capital_label)}：${esc(t.label_note)}`);
-  return `<p>基本分 ${r.base.toFixed(1)}，屬於第 ${r.group} 組（共 ${r.groups} 組，1 為最低）。各本金級距的分數 = 基本分 × 本金係數，再套用歷史校準上限。</p>
-    ${table(["本金級距", "分數", "本金係數", "來回成本占比", "上限", `第 ${r.group} 組歷史回測平均（${cal.horizon_months} 個月，扣成本）`, "同期 0050 / 定存"], rows)}
+  return `<p>基本分 ${r.base.toFixed(1)}，屬於第 ${r.group} 組（共 ${r.groups} 組，1 為最低）。各本金級距的${esc(r.name)} = 基本分 × 本金係數，再套用歷史校準上限。</p>
+    <p><strong>驗證</strong>（${esc(r.aim)}；點開看樣本期間、數值與說明）</p>
+    ${validationsHTML(r)}
+    ${r.validated ? "" : `<p class="warn"><i class="dot"></i><span>${esc(r.validation_note)}</span></p>`}
+    ${table(["本金級距", esc(r.name), "本金係數", "來回成本占比", "上限", `第 ${r.group} 組歷史回測平均（${cal.horizon_months} 個月，扣成本，僅記錄）`, "同期 0050 / 定存"], rows)}
     ${notes.length ? `<p class="small muted">${notes.join("<br>")}</p>` : ""}
     ${table(["項目", "得分", "說明"], parts)}
     <p class="small muted">樣本外基準日 ${esc(cal.out_of_sample[0])}～${esc(cal.out_of_sample[1])}（${cal.months} 個月），資料至 ${esc(cal.data_as_of)}。歷史回測平均，不是預期報酬。</p>
@@ -364,7 +378,7 @@ function renderDetail(s) {
     <div class="line"><span><span class="key">整體</span>${verdict(s.overall.code)}</span>${legend}</div>
     ${drivers}
     <div class="sections">
-      ${section("分數明細", scoreBody(s))}
+      ${section("條件符合度明細", scoreBody(s))}
       ${section("白話解釋：符合哪些投資大師原則", principlesBody(s.principles))}
       ${section("穩定性指標（V1 vs V3）", metricsBody(s))}
       ${section("投資框架", frameworksBody(s))}

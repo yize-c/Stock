@@ -17,6 +17,11 @@ def _fee(amount: float, costs: CostsConfig) -> float:
     return max(costs.min_fee, amount * costs.fee_rate * costs.fee_discount)
 
 
+def broker_fee(amount: float, costs: CostsConfig) -> float:
+    """The broker fee on one order of ``amount`` (either side)."""
+    return _fee(amount, costs)
+
+
 def round_trip_cost(price: float, shares: int, is_etf: bool, costs: CostsConfig) -> float:
     """Two broker fees plus the sell-side tax, all on ``price * shares``."""
     amount = price * shares

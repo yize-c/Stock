@@ -135,6 +135,9 @@ ul.list { list-style: none; margin: 0; padding: 0 var(--gutter) 8px; display: gr
 .hero .big { font-size: 44px; font-weight: 700; line-height: 1; }
 .hero .label { font-size: 18px; font-weight: 600; }
 .hero p { margin-top: 6px; }
+.checks { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 8px; font-size: 13px; }
+.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+.check.ok { color: var(--text); } .check.ok .dot { background: var(--ok); } .check.no .dot { background: var(--none); }
 .warn { color: var(--bad); font-size: 13px; display: flex; gap: 8px; align-items: baseline; margin-top: 8px; }
 .warn .dot { background: var(--bad); transform: translateY(-1px); }
 .line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; padding: 4px 0; font-size: 14px; }

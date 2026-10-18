@@ -868,6 +868,36 @@ class ResearchScoreConfig(_Model):
         return self
 
 
+class StrategyConfig(_Model):
+    """The 條件符合度 strategy backtest (user decision 2026-10-18): the top-scored stocks,
+    equal weight, rebalanced every ``rebalance_months``, against 0050 with dividends."""
+
+    first_rebalance: date
+    last_rebalance: date
+    end: date  # holdings are valued to this day
+    rebalance_months: PositiveInt
+    holdings: PositiveInt
+    max_industry_share: Fraction  # one industry holds at most this share of the holdings
+    out_of_sample_start: date  # first out-of-sample rebalance
+    rolling_years_out_of_sample: PositiveInt
+    rolling_years_full: PositiveInt
+    # Success (out of sample, all four): drawdown at most this multiple of 0050's; annual
+    # return at most this far below 0050's; Sharpe and the share of positive rolling holding
+    # periods at most these far below 0050's.
+    max_drawdown_ratio: PositiveFloat
+    cagr_shortfall: Annotated[float, Field(ge=0.0)]
+    sharpe_shortfall: Annotated[float, Field(ge=0.0)]
+    positive_share_shortfall: Fraction
+
+    @model_validator(mode="after")
+    def _check(self) -> StrategyConfig:
+        if not self.first_rebalance < self.out_of_sample_start <= self.last_rebalance < self.end:
+            raise ValueError(
+                "strategy needs first_rebalance < out_of_sample_start <= last_rebalance < end"
+            )
+        return self
+
+
 class CalibrationConfig(_Model):
     """Full-market calibration of the base score (spec v2 §4.2)."""
 
@@ -886,6 +916,10 @@ class CalibrationConfig(_Model):
     liquidity_keep_share: Fraction  # keep this share of the most traded stocks each month
     groups: Annotated[int, Field(ge=2)]
     min_rank_correlation: Annotated[float, Field(ge=-1.0, le=1.0)]
+    # 條件符合度 validations a (drawdowns) and b (EPS, revenue growth) gate at this; the return
+    # calibration (c) is recorded with min_rank_correlation but gates nothing.
+    validation_min_rank_correlation: Annotated[float, Field(ge=-1.0, le=1.0)]
+    strategy: StrategyConfig
     confidence: Fraction
     bootstrap_draws: PositiveInt
     seed: int
@@ -898,6 +932,8 @@ class CalibrationConfig(_Model):
             raise ValueError("calibration needs start < out_of_sample_start <= last_base_date")
         if add_months(self.last_base_date, self.horizon_months) > self.data_as_of:
             raise ValueError("calibration.last_base_date + horizon must not pass data_as_of")
+        if self.strategy.first_rebalance < self.start or self.strategy.end > self.data_as_of:
+            raise ValueError("calibration.strategy must lie between start and data_as_of")
         return self
 
 
