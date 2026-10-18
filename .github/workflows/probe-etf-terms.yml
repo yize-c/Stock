@@ -5,10 +5,6 @@ name: Probe ETF fees, issuers and terms
 # requests without credentials; only public pages.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - scripts/probe_etf_terms.py
-      - .github/workflows/probe-etf-terms.yml
 
 permissions:
   contents: read

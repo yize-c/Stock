@@ -5,10 +5,6 @@ name: Probe official open data
 # Read-only GET requests without credentials; only public pages.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - scripts/probe_open_data.py
-      - .github/workflows/probe-open-data.yml
 
 permissions:
   contents: read

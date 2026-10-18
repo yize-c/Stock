@@ -5,10 +5,6 @@ name: Probe active ETF holdings sources
 # Read-only GET requests without credentials; only public pages.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - scripts/probe_active_etf.py
-      - .github/workflows/probe-active-etf.yml
 
 permissions:
   contents: read

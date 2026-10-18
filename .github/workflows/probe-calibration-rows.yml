@@ -5,10 +5,6 @@ name: Probe calibration exclusions
 # Read-only; prints counts, check names, codes and derived statistics only.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - scripts/probe_calibration_rows.py
-      - .github/workflows/probe-calibration-rows.yml
 
 permissions:
   contents: read
