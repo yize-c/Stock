@@ -7,14 +7,13 @@ import pytest
 
 from stock_research.analysis.results import InsufficientHistory
 from stock_research.analysis.revenue import (
-    check_consecutive,
+    gap_months,
     recent_yoy_median,
     summarize_yoy,
     window_high_months,
     yoy_table,
 )
 from stock_research.config import load_config
-from stock_research.data.errors import MissingDataError
 from stock_research.data.windows import WindowName, build_window
 from tests.conftest import DEFAULT_CONFIG
 
@@ -53,12 +52,22 @@ def test_yoy_with_zero_base_is_undefined() -> None:
     assert pd.isna(yoy_table("x", monthly("2018-01", values)).iloc[0]["yoy"])
 
 
-def test_missing_month_raises() -> None:
-    data = growing("2018-01", 24).drop(index=5)
-    with pytest.raises(MissingDataError, match="2018-06"):
-        check_consecutive("x", data)
-    with pytest.raises(MissingDataError):
-        yoy_table("x", data)
+def test_a_missing_month_marks_only_the_windows_that_cover_it() -> None:
+    """FinMind misses some months (mostly 2012-2015): the rows that need one are gaps, and
+    a window covering a gap has no revenue YoY (user decision 2026-10-19), others are fine."""
+    data = growing("2016-01", 78).drop(index=17)  # 2017-06 is missing
+    table = yoy_table("x", data)
+    holes = table.loc[table["gap"], "period_end"].tolist()
+    assert holes == [date(2017, 6, 30), date(2018, 6, 30)]  # the month and a year later
+    assert table.loc[table["gap"], "yoy"].isna().all()
+    assert table.loc[table["gap"], "available_date"].tolist() == [date(2017, 8, 10),
+                                                                   date(2018, 7, 10)]  # fmt: skip
+    v3 = build_window(WindowName.PRE_2020, CONFIG, AS_OF)
+    v1 = build_window(WindowName.POST_2020, CONFIG, AS_OF)
+    stat = summarize_yoy(table, v3, 365, min_observations=12)
+    assert isinstance(stat, InsufficientHistory) and "2017-06" in stat.reason
+    assert summarize_yoy(table, v1, 365, min_observations=12).n == 17
+    assert gap_months(v1.filter_financials(table)) == []
 
 
 def test_yoy_straddling_the_split_belongs_to_no_window() -> None:

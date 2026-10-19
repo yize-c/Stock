@@ -14,7 +14,6 @@ import pandas as pd
 
 from stock_research.analysis.results import InsufficientHistory
 from stock_research.analysis.weighting import WeightedStat, weighted_mean
-from stock_research.data.errors import MissingDataError
 from stock_research.data.windows import TimeWindow
 
 
@@ -22,45 +21,52 @@ def _months(revenue: pd.DataFrame) -> pd.Series:
     return pd.to_datetime(revenue["period_end"]).dt.to_period("M")
 
 
-def check_consecutive(ticker: str, revenue: pd.DataFrame) -> None:
-    """Raise if a month is missing between the first and last reported month."""
-    months = _months(revenue)
-    expected = pd.period_range(months.min(), months.max(), freq="M")
-    missing = sorted(set(expected) - set(months))
-    if missing:
-        raise MissingDataError(
-            ticker, "revenue.month", [str(m) for m in missing[:5]], "every month reported"
-        )
-
-
 def yoy_table(ticker: str, revenue: pd.DataFrame) -> pd.DataFrame:
     """One row per month with a year-ago month: ``yoy`` = revenue / year-ago revenue - 1.
 
-    A year-ago revenue of zero or less gives NaN (growth is undefined).
+    A year-ago revenue of zero or less gives NaN (growth is undefined). A month FinMind does
+    not report (it happens, mostly in 2012-2015) is not filled in: the rows that need it
+    (that month and the one a year later) have ``gap`` set and NaN values, so every window,
+    and every measure, that covers the month sees the hole instead of a shorter year. A gap
+    row is dated by the next reported month's announcement (the missing month was due before
+    it).
     """
-    check_consecutive(ticker, revenue)
-    columns = ["period_start", "period_end", "available_date", "revenue", "revenue_year_ago", "yoy"]
+    columns = [
+        "period_start", "period_end", "available_date", "revenue", "revenue_year_ago", "yoy",
+        "gap",
+    ]  # fmt: skip
     frame = revenue.assign(_m=_months(revenue)).set_index("_m").sort_index()
     if frame.empty:
         return pd.DataFrame(columns=columns)
     full = frame.reindex(pd.period_range(frame.index.min(), frame.index.max(), freq="M"))
+    reported = full["value"].notna()
     prior = full["value"].shift(12)
-    prior_available = full["available_date"].shift(12)
+    # A missing month is dated by the next reported month's announcement.
+    own_available = full["available_date"].bfill()
+    prior_available = own_available.shift(12)
     out = pd.DataFrame(
         {
             "period_start": [(m - 12).start_time.date() for m in full.index],
             "period_end": [m.end_time.date() for m in full.index],
             "available_date": [
                 max(a, b) if not pd.isna(b) else None
-                for a, b in zip(full["available_date"], prior_available, strict=True)
+                for a, b in zip(own_available, prior_available, strict=True)
             ],
             "revenue": full["value"].astype(float),
             "revenue_year_ago": prior.astype(float),
+            "gap": ~(reported & reported.shift(12, fill_value=False)),
         }
     )
-    out = out.loc[out["revenue_year_ago"].notna()]
+    out = out.iloc[12:]  # the first year has no year-ago month in the data
     out["yoy"] = out["revenue"] / out["revenue_year_ago"].where(out["revenue_year_ago"] > 0) - 1.0
     return out[columns].reset_index(drop=True)
+
+
+def gap_months(rows: pd.DataFrame) -> list[str]:
+    """Months (YYYY-MM) of the YoY rows in ``rows`` that miss a reported month."""
+    if "gap" not in rows or not rows["gap"].any():
+        return []
+    return [pd.Timestamp(d).strftime("%Y-%m") for d in rows.loc[rows["gap"], "period_end"]]
 
 
 def summarize_yoy(
@@ -68,6 +74,13 @@ def summarize_yoy(
 ) -> WeightedStat | InsufficientHistory:
     """Weighted and unweighted mean YoY inside ``window``."""
     inside = window.filter_financials(yoy)
+    holes = gap_months(inside)
+    if holes:
+        return InsufficientHistory(
+            window.name,
+            "revenue_yoy",
+            f"missing revenue month(s): YoY of {holes[0]} and {len(holes) - 1} more",
+        )
     values = inside.set_index("period_end")["yoy"].dropna()
     if len(values) < min_observations:
         return InsufficientHistory(

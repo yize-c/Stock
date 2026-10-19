@@ -245,6 +245,12 @@ markets:
       # days followed by a close beyond the price limit (and no ex-rights event) is treated
       # as an uncovered capital change: prices start on the resumption day.
       min_halt_trading_days: 3
+      # A traded day with volume but no price counts as a day without a close (user decision
+      # 2026-10-19; in the full-market probe 80% of such runs were one day and the volume
+      # was 0.2% of the stock's median traded day, p90 1.8%). Longer runs, or more volume
+      # than this share of the median traded day, look like a source outage and fail.
+      unpriced_max_run_days: 10
+      unpriced_max_volume_share: 0.20
       # Raw-close cross-check between official, FinMind and yfinance.
       cross_source_tolerance: 0.005
       # Yahoo closes found wrong against the official daily data (TWSE STOCK_DAY, TPEx
@@ -666,6 +672,32 @@ calibration:
   # the bottom group's and the rank correlation between group and return must reach this.
   groups: 10
   min_rank_correlation: 0.7
+  # 條件符合度 (user decision 2026-10-18): validation a (score vs the next 12 months' maximum
+  # drawdown) and b (vs the next 12 months' EPS and revenue growth, judged separately) pass
+  # when the top group beats the bottom group and the rank correlation of group and the
+  # groups' median outcome reaches this. The return calibration (c) above is recorded but no
+  # longer decides whether the score is shown.
+  validation_min_rank_correlation: 0.5
+  # Strategy backtest (user decisions 2026-10-18: quarterly; the lenient criteria): the
+  # `holdings` highest base scores among the liquid stocks, at most max_industry_share of them
+  # from one industry, equal weight, net of trading costs, against 0050 with dividends. The
+  # score needs V1 (from 2020) and full TTM, so it starts in 2021-06; 2022 falls in sample and
+  # 2025-04 out of sample.
+  strategy:
+    first_rebalance: 2021-06-30
+    last_rebalance: 2026-06-30
+    end: 2026-09-30
+    rebalance_months: 3
+    holdings: 10
+    max_industry_share: 0.30
+    out_of_sample_start: 2023-12-31
+    # Out of sample is under 3 years, so its rolling holding periods are 1 year.
+    rolling_years_out_of_sample: 1
+    rolling_years_full: 3
+    max_drawdown_ratio: 0.8  # drawdown at most 0.8 x 0050's
+    cagr_shortfall: 0.03  # annual return at least 0050's minus 3 percentage points
+    sharpe_shortfall: 0.0  # Sharpe at least 0050's
+    positive_share_shortfall: 0.0  # positive rolling periods at least 0050's share
   confidence: 0.95
   bootstrap_draws: 1000
   seed: 20211031
@@ -755,3 +787,28 @@ risk_checklist:
   min_points: 4
   flat_points: 0.01  # ratios: a change under 1 percentage point over the window is flat
   flat_relative: 0.05  # amounts and days: a change under 5% of the mean level is flat
+
+allocation:
+  # 成長 × 風險 §1.7: the asset mix for each investor preference (research_score.preferences).
+  # Tentative values from the user (2026-10-18), awaiting the senior investor's confirmation;
+  # every place that uses them shows `status`. *_max are upper limits; shares add up to 1.
+  status: 暫定，待資深股民確認
+  profiles:
+    conservative:
+      mid_growth_low_risk: 0.50
+      etf_0050: 0.30
+      high_growth_mid_risk_max: 0.10
+      high_growth_high_risk_max: 0.00
+      cash: 0.10
+    balanced:
+      mid_growth_low_risk: 0.35
+      etf_0050: 0.30
+      high_growth_mid_risk_max: 0.20
+      high_growth_high_risk_max: 0.05
+      cash: 0.10
+    aggressive:
+      mid_growth_low_risk: 0.25
+      etf_0050: 0.25
+      high_growth_mid_risk_max: 0.30
+      high_growth_high_risk_max: 0.15
+      cash: 0.05

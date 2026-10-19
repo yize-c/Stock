@@ -125,9 +125,14 @@ def _published(frame: pd.DataFrame, as_of: date, start: date) -> pd.DataFrame:
 
 
 def risk_checklist(
-    data: StockData, settings: RiskChecklistConfig, qualitative: dict[str, str] | None = None
+    data: StockData,
+    settings: RiskChecklistConfig,
+    qualitative: dict[str, str] | None = None,
+    yoy_flag: float | None = None,
 ) -> RiskChecklist:
-    """``qualitative``: risk key -> text summarised from the user's documents (步驟 5)."""
+    """``qualitative``: risk key -> text summarised from the user's documents (步驟 5).
+    ``yoy_flag``: monthly YoY beyond ±this is marked for manual confirmation by the data
+    checks; a measure built on such a month says so."""
     as_of = data.as_of
     start = years_before(as_of, settings.lookback_years)
     ttm = _published(ttm_table(data.quarterly, data.basis, as_of), as_of, start)
@@ -148,11 +153,26 @@ def risk_checklist(
         quarterly["revenue"].astype(float) if "revenue" in quarterly else pd.Series(dtype=float)
     )
     qoq = (single_revenue / single_revenue.shift(1) - 1).dropna()
+    # One value per calendar month; a window with a missing month has no deviation (a gap
+    # is not bridged, so "12 months" is always 12 consecutive months).
     monthly_yoy = pd.Series(
-        yoy["yoy"].astype(float).to_numpy(), index=list(yoy["period_end"])
-    ).dropna()
-    yoy_volatility = monthly_yoy.rolling(12).std().dropna()
+        yoy["yoy"].astype(float).to_numpy(), index=pd.PeriodIndex(yoy["period_end"], freq="M")
+    )
+    if len(monthly_yoy):
+        months = pd.period_range(monthly_yoy.index.min(), monthly_yoy.index.max(), freq="M")
+        monthly_yoy = monthly_yoy.reindex(months)
+    rolling_std = monthly_yoy.rolling(12, min_periods=12).std().dropna()
+    yoy_volatility = pd.Series(
+        rolling_std.to_numpy(), index=[m.end_time.date() for m in rolling_std.index]
+    )
     yoy_volatility = yoy_volatility.loc[[d >= start for d in yoy_volatility.index]]
+
+    def volatility_text(values: pd.Series) -> str:
+        text = f"最新 {values.iloc[-1]:.1%}（{_span(values)}，每月取連續 12 個月的標準差）"
+        last = monthly_yoy.dropna().tail(12)
+        if yoy_flag is not None and (last.abs() > yoy_flag).any():
+            text += f"；含年增率超過 ±{yoy_flag:.0%} 的月份（資料檢查標為需人工確認）"
+        return text
 
     def ratio_text(values: pd.Series) -> str:
         return f"最新 {values.iloc[-1]:.1%}（{_span(values)}，近四季）"
@@ -188,7 +208,12 @@ def risk_checklist(
         "concentration": (),
         "demand": (
             metric(
-                "revenue_yoy_volatility", volatility_name, "ratio", yoy_volatility, UP, ratio_text
+                "revenue_yoy_volatility",
+                volatility_name,
+                "ratio",
+                yoy_volatility,
+                UP,
+                volatility_text,
             ),
             metric("inventory_days", "存貨周轉天數", "days", inventory_days, UP, days_text),
             metric("revenue_qoq", "營收季增率", "ratio", qoq, DOWN, growth_text),

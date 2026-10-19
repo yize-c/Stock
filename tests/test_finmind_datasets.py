@@ -233,13 +233,57 @@ def test_parse_fiscal_period(label, expected) -> None:
     assert parse_fiscal_period(label) == expected
 
 
-def test_parse_fiscal_period_not_applicable() -> None:
-    assert parse_fiscal_period("不適用") is None
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [  # labels seen in the full-market calibration (2026-10-19)
+        ("112年度及113年上半年", (date(2023, 1, 1), date(2023, 12, 31), PeriodType.ANNUAL)),
+        ("\u3000108年度及109年第2季", (date(2019, 1, 1), date(2019, 12, 31), PeriodType.ANNUAL)),
+        ("110年度第1季及第2季", (date(2021, 1, 1), date(2021, 3, 31), PeriodType.QUARTER)),
+        ("109年第四季及110年第1季", (date(2020, 10, 1), date(2020, 12, 31), PeriodType.QUARTER)),
+        ("109年度前三季", (date(2020, 1, 1), date(2020, 9, 30), PeriodType.YEAR_TO_DATE)),
+        ("109年下半年度及110年上半年度",
+         (date(2020, 7, 1), date(2020, 12, 31), PeriodType.YEAR_TO_DATE)),
+        ("109下半年度盈餘分派暨109年度資本公積發放現金",
+         (date(2020, 7, 1), date(2020, 12, 31), PeriodType.YEAR_TO_DATE)),
+        ("股票股利所屬期間113年度、現金股利113後半年度",
+         (date(2024, 1, 1), date(2024, 12, 31), PeriodType.ANNUAL)),
+        ("114年及以前年度", (date(2025, 1, 1), date(2025, 12, 31), PeriodType.ANNUAL)),
+        ("113年度及114年上半年度", (date(2024, 1, 1), date(2024, 12, 31), PeriodType.ANNUAL)),
+        ("108年度及109年前3季(部分)", (date(2019, 1, 1), date(2019, 12, 31), PeriodType.ANNUAL)),
+        ("112年後半年度股票股利及113年前半年度現金股利",
+         (date(2023, 7, 1), date(2023, 12, 31), PeriodType.YEAR_TO_DATE)),
+        ("１１３年", (date(2024, 1, 1), date(2024, 12, 31), PeriodType.ANNUAL)),
+    ],
+)  # fmt: skip
+def test_parse_fiscal_period_counts_a_combined_label_in_its_earliest_period(
+    label, expected
+) -> None:
+    assert parse_fiscal_period(label) == expected
 
 
-def test_parse_fiscal_period_rejects_unknown() -> None:
+@pytest.mark.parametrize(
+    "label",
+    [
+        "不適用",
+        "不適用。",
+        "/不適用",
+        "資本公積發放現金，不適用",
+        "本次僅申報現金增資者，故不適用",
+        "\u3000\u3000\u3000年度及\u3000\u3000年第\u3000\u3000季/不適用",  # a blank template
+        "112年不適用",
+        "不適用(112年度)",
+    ],
+)
+def test_parse_fiscal_period_not_applicable(label) -> None:
+    assert parse_fiscal_period(label) is None
+
+
+@pytest.mark.parametrize(
+    "label", ["2019", "-1911年", "適用", "113年3月", "112年1~6月", "112年度(第1季)"]
+)
+def test_parse_fiscal_period_rejects_unknown(label) -> None:
     with pytest.raises(AnomalyError):
-        parse_fiscal_period("2019")
+        parse_fiscal_period(label)
 
 
 def test_dividends() -> None:

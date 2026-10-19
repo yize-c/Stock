@@ -106,9 +106,24 @@ def test_gap_detected() -> None:
 def test_bad_close_values(value, error, field) -> None:
     closes = [100.0] * len(JULY_2024_CLOSES)
     closes[3] = value
+    opens = [100.0] * len(JULY_2024_CLOSES)  # another price that day: the close is missing
     with pytest.raises(error) as exc:
-        check_price_completeness("2330", prices(closes), CAL)
+        check_price_completeness("2330", prices(closes, open=opens), CAL)
     assert exc.value.field == field
+
+
+def test_traded_day_without_open_is_a_warning() -> None:
+    """FinMind records open = 0 on some older traded days; no analysis reads open/high/low."""
+    n = len(JULY_2024_CLOSES)
+    opens = [100.0] * n
+    opens[4] = float("nan")
+    issues = check_price_completeness("2330", prices(open=opens, high=[101.0] * n), CAL)
+    assert [(i.check, i.severity) for i in issues] == [("missing_open", IssueSeverity.WARNING)]
+    assert issues[0].dates == (JULY_2024_CLOSES[4],)
+    closes = [100.0] * n
+    closes[3] = float("nan")  # a close is still required when the day has other prices
+    with pytest.raises(MissingDataError, match="close"):
+        check_price_completeness("2330", prices(closes, open=opens), CAL)
 
 
 def test_negative_volume() -> None:
@@ -305,11 +320,15 @@ def test_priceless_no_trade_day_is_notice_not_error() -> None:
     assert issues[0].check == "no_trades" and "1 of them have no price" in issues[0].detail
 
 
-def test_missing_price_with_volume_is_still_an_error() -> None:
+def test_volume_without_any_price_is_a_day_without_a_close() -> None:
+    """FinMind: 443 stocks have such days, at a sliver of the usual volume (user decision
+    2026-10-19): a warning, and the day counts as one without a close."""
     df = prices()
-    df.loc[4, "close"] = float("nan")  # volume 1000 but no close
-    with pytest.raises(MissingDataError, match="close"):
-        check_price_completeness("2330", df, CAL)
+    df["open"] = df["close"]
+    df.loc[4, ["open", "close"]] = float("nan")  # volume 1000 but no price at all
+    issues = check_price_completeness("2330", df, CAL)
+    assert [(i.check, i.severity) for i in issues] == [("unpriced", IssueSeverity.WARNING)]
+    assert issues[0].dates == (JULY_2024_CLOSES[4],)
 
 
 def test_partially_missing_prices_on_no_trade_day_is_error() -> None:
@@ -350,3 +369,32 @@ def test_suspension_of_other_ticker_or_outside_range_still_raises() -> None:
     )
     with pytest.raises(MissingDataError):
         check_price_completeness("2330", prices(days=days), CAL, [other])
+
+
+def test_long_or_heavy_runs_of_unpriced_days_fail() -> None:
+    """Days with volume but no price only count as days without a close in short runs at a
+    sliver of the usual volume; otherwise they look like a source outage."""
+    df = prices()
+    df["open"] = df["close"]
+    df.loc[[4, 5, 6], ["open", "close"]] = float("nan")
+    df.loc[[4, 5, 6], "volume"] = 1
+    with pytest.raises(MissingDataError, match="3 consecutive days"):
+        check_price_completeness("2330", df, CAL, unpriced_max_run_days=2)
+    issues = check_price_completeness(
+        "2330", df, CAL, unpriced_max_run_days=3, unpriced_max_volume_share=0.2
+    )
+    assert [i.check for i in issues] == ["unpriced"]
+    df.loc[5, "volume"] = 1000  # as much as a priced day
+    with pytest.raises(AnomalyError, match="of the median priced day"):
+        check_price_completeness("2330", df, CAL, unpriced_max_volume_share=0.2)
+
+
+def test_missing_revenue_months_are_listed() -> None:
+    months = pd.period_range("2019-01", "2020-12", freq="M").delete(5)
+    revenue = pd.DataFrame(
+        {"period_end": [m.end_time.date() for m in months], "revenue": [100.0] * len(months)}
+    )
+    issues = check_monthly_revenue("2330", revenue, 5.0)
+    gaps = [i for i in issues if i.check == "revenue_gap"]
+    assert len(gaps) == 1 and gaps[0].severity is IssueSeverity.WARNING
+    assert gaps[0].dates == (date(2019, 6, 30),) and "2019-06" in gaps[0].detail

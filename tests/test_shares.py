@@ -140,6 +140,24 @@ def test_split_changes_par() -> None:
     assert basis.par_on(date(2022, 7, 12)) == 10.0 and basis.par_on(date(2022, 7, 13)) == 2.5
 
 
+@pytest.mark.parametrize(
+    ("fixture", "chinese"),
+    [
+        ("finmind_capital_reduction_2349.json", "彌補虧損"),
+        ("finmind_capital_reduction_3481.json", "現金減資"),
+    ],
+)
+def test_capital_reduction_reasons_in_chinese(fixture, chinese) -> None:
+    code = fixture[-9:-5]
+    events = applied(normalize_capital_reductions(rows(fixture), code))
+    english = share_basis(code, events, pd.DataFrame(), start=START, initial_par=10.0, tolerance=0)
+    renamed = share_basis(
+        code, events.assign(detail=chinese), pd.DataFrame(), start=START, initial_par=10.0,
+        tolerance=0,
+    )  # fmt: skip
+    assert renamed.multipliers["multiplier"].tolist() == english.multipliers["multiplier"].tolist()
+
+
 def test_capital_reductions() -> None:
     loss = applied(
         normalize_capital_reductions(rows("finmind_capital_reduction_2349.json"), "2349")
@@ -229,3 +247,46 @@ def test_share_counts_from_statements() -> None:
     )
     implied, capital = share_counts(financials, basis)
     assert implied[date(2019, 12, 31)] == 100.0 and capital[date(2019, 12, 31)] == 100.0
+
+
+def test_share_counts_without_a_parent_line_use_net_income_less_nci() -> None:
+    """73 stocks in the full-market calibration report no parent line (no NCI)."""
+    end = date(2019, 12, 31)
+
+    def line(statement, item, value):
+        return {"statement": statement, "item": item, "period_end": end, "value": value}
+
+    basis = share_basis(
+        "x", pd.DataFrame(), pd.DataFrame(), start=START, initial_par=10.0, tolerance=0
+    )
+    rows = [
+        line("income", "EPS", 2.0),
+        line("income", "IncomeAfterTaxes", 200.0),
+        line("balance", "OrdinaryShare", 1000.0),
+    ]
+    implied, _ = share_counts(pd.DataFrame(rows), basis)
+    assert implied[end] == 100.0
+    with_nci = [*rows, line("income", "NoncontrollingInterests", 20.0)]
+    implied, _ = share_counts(pd.DataFrame(with_nci), basis)
+    assert implied[end] == 90.0
+
+
+def test_a_quarter_missing_a_reported_nci_line_gets_no_parent_income() -> None:
+    """A company that reports an NCI line in some quarter: a quarter without it (and without
+    a parent line) is not assumed to have no non-controlling interests."""
+    q1, q2 = date(2019, 3, 31), date(2019, 6, 30)
+
+    def line(statement, item, end, value):
+        return {"statement": statement, "item": item, "period_end": end, "value": value}
+
+    basis = share_basis(
+        "x", pd.DataFrame(), pd.DataFrame(), start=START, initial_par=10.0, tolerance=0
+    )
+    rows = [
+        line("income", "EPS", q1, 2.0), line("income", "EPS", q2, 2.0),
+        line("income", "IncomeAfterTaxes", q1, 200.0),
+        line("income", "IncomeAfterTaxes", q2, 200.0),
+        line("income", "NoncontrollingInterests", q1, 20.0),
+    ]  # fmt: skip
+    implied, _ = share_counts(pd.DataFrame(rows), basis)
+    assert implied[q1] == 90.0 and pd.isna(implied[q2])

@@ -8,7 +8,7 @@ const Holdings = (() => {
   const P = Portfolio;
   const KEY = "portfolio.v1";
   const LEVEL = { high: "高", mid: "中", low: "低" };
-  const PLAN_NOTE = "建議只依程式事先固定的規則與歷史回測的參考分數產生，不代表未來，不構成投資建議。";
+  const PLAN_NOTE = "建議只依程式事先固定的規則與條件符合度（追求比 0050 抗跌）產生，不代表未來，不構成投資建議。";
   const pf = {
     state: null,
     loadError: null,
@@ -417,13 +417,13 @@ const Holdings = (() => {
   function snapshotHTML(row) {
     const b = row.bought;
     if (!b) return `<p class="muted">無買進時紀錄（買進日 ${esc(row.opened ? row.opened.date : "")} 早於網站保存分數的日期，或不在觀察清單）。</p>`;
-    if (b.status !== "ok") return `<p>${esc(b.as_of)} 的資料檢查未通過，沒有分數。</p>`;
+    if (b.status !== "ok") return `<p>${esc(b.as_of)} 的資料檢查未通過，沒有條件符合度。</p>`;
     const aspects = Object.entries(ASPECTS)
       .map(([k, n]) => `<span><span class="key">${n}</span>${b.aspects && b.aspects[k] ? verdict(b.aspects[k]) : "—"}</span>`)
       .join("");
     const tiers = Object.entries(b.tiers || {}).map(([c, v]) => `${esc(capitalLabel(Number(c)))} ${Math.round(v)}`).join("・");
     return `<p>買進時參考 ${esc(b.as_of)} 的匯出：</p><div class="line">${aspects}</div>
-      <p class="small muted">分數：${tiers || "—"}</p>`;
+      <p class="small muted">條件符合度：${tiers || "—"}</p>`;
   }
 
   function capitalLabel(capital) {
@@ -666,7 +666,7 @@ const Holdings = (() => {
       </form></section>
       <div class="pad">${section("建議規則", `<ul class="plain small">
         <li>依金額決定檔數：${state.index.capital_tiers.map((t) => esc(t.label)).join("、")}（從匯出參數讀取）。</li>
-        <li>候選：該級距分數 ≥ ${rule.min_score}，且沒有被標示「${esc(rule.excluded_cap_reason)}」。</li>
+        <li>候選：該級距條件符合度 ≥ ${rule.min_score}，且沒有被標示「${esc(rule.excluded_cap_reason)}」。</li>
         <li>等權重，單一個股最多 ${Math.round(rule.max_weight * 100)}%，保留 ${Math.round(rule.cash_reserve * 100)}% 現金；不足的檔數或上限以外的部分放 ${esc(rule.fallback_etf)}。</li>
         <li>分配金額夠買一張就以整張為單位，剩下用零股補；整張與零股分兩筆下單、各收手續費。</li>
         <li>來回成本超過 ${(rule.cost_ratio_warning * 100).toFixed(1)}% 時提醒手續費占比偏高。</li></ul>`)}</div>`;

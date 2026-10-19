@@ -280,6 +280,11 @@ class DataValidationConfig(_Model):
     cross_source_lookback_trading_days: PositiveInt
     balance_sheet_tolerance: Fraction
     revenue_yoy_abs_max: PositiveFloat
+    # Traded days with volume but no price count as days without a close (user decision
+    # 2026-10-19), but only in short runs at a sliver of the usual volume; beyond these
+    # limits they look like a source outage and fail.
+    unpriced_max_run_days: PositiveInt
+    unpriced_max_volume_share: Fraction
 
 
 class TwMarketConfig(_Model):
@@ -868,6 +873,36 @@ class ResearchScoreConfig(_Model):
         return self
 
 
+class StrategyConfig(_Model):
+    """The 條件符合度 strategy backtest (user decision 2026-10-18): the top-scored stocks,
+    equal weight, rebalanced every ``rebalance_months``, against 0050 with dividends."""
+
+    first_rebalance: date
+    last_rebalance: date
+    end: date  # holdings are valued to this day
+    rebalance_months: PositiveInt
+    holdings: PositiveInt
+    max_industry_share: Fraction  # one industry holds at most this share of the holdings
+    out_of_sample_start: date  # first out-of-sample rebalance
+    rolling_years_out_of_sample: PositiveInt
+    rolling_years_full: PositiveInt
+    # Success (out of sample, all four): drawdown at most this multiple of 0050's; annual
+    # return at most this far below 0050's; Sharpe and the share of positive rolling holding
+    # periods at most these far below 0050's.
+    max_drawdown_ratio: PositiveFloat
+    cagr_shortfall: Annotated[float, Field(ge=0.0)]
+    sharpe_shortfall: Annotated[float, Field(ge=0.0)]
+    positive_share_shortfall: Fraction
+
+    @model_validator(mode="after")
+    def _check(self) -> StrategyConfig:
+        if not self.first_rebalance < self.out_of_sample_start <= self.last_rebalance < self.end:
+            raise ValueError(
+                "strategy needs first_rebalance < out_of_sample_start <= last_rebalance < end"
+            )
+        return self
+
+
 class CalibrationConfig(_Model):
     """Full-market calibration of the base score (spec v2 §4.2)."""
 
@@ -886,6 +921,10 @@ class CalibrationConfig(_Model):
     liquidity_keep_share: Fraction  # keep this share of the most traded stocks each month
     groups: Annotated[int, Field(ge=2)]
     min_rank_correlation: Annotated[float, Field(ge=-1.0, le=1.0)]
+    # 條件符合度 validations a (drawdowns) and b (EPS, revenue growth) gate at this; the return
+    # calibration (c) is recorded with min_rank_correlation but gates nothing.
+    validation_min_rank_correlation: Annotated[float, Field(ge=-1.0, le=1.0)]
+    strategy: StrategyConfig
     confidence: Fraction
     bootstrap_draws: PositiveInt
     seed: int
@@ -898,6 +937,8 @@ class CalibrationConfig(_Model):
             raise ValueError("calibration needs start < out_of_sample_start <= last_base_date")
         if add_months(self.last_base_date, self.horizon_months) > self.data_as_of:
             raise ValueError("calibration.last_base_date + horizon must not pass data_as_of")
+        if self.strategy.first_rebalance < self.start or self.strategy.end > self.data_as_of:
+            raise ValueError("calibration.strategy must lie between start and data_as_of")
         return self
 
 
@@ -1061,6 +1102,30 @@ class RobustnessConfig(_Model):
         return self
 
 
+class AllocationProfile(_Model):
+    """One preference's asset mix (成長 × 風險 §1.7); caps are upper limits, the rest fixed."""
+
+    mid_growth_low_risk: Fraction  # 中成長・低風險
+    etf_0050: Fraction
+    high_growth_mid_risk_max: Fraction  # 高成長・中風險, at most
+    high_growth_high_risk_max: Fraction  # 高成長・高風險, at most
+    cash: Fraction
+
+    @model_validator(mode="after")
+    def _check(self) -> AllocationProfile:
+        total = sum(self.model_dump().values())
+        if abs(total - 1.0) > 1e-9:
+            raise ValueError(f"allocation shares must add up to 1 (got {total:.4f})")
+        return self
+
+
+class AllocationConfig(_Model):
+    """Asset allocation by investor preference (成長 × 風險 §1.7); tentative values."""
+
+    status: str  # shown wherever the mix is used, e.g. "暫定，待資深股民確認"
+    profiles: dict[str, AllocationProfile]
+
+
 class AppConfig(_Model):
     general: GeneralConfig
     markets: MarketsConfig
@@ -1084,6 +1149,7 @@ class AppConfig(_Model):
     risk_rating: RiskRatingConfig
     quadrant: QuadrantConfig
     risk_checklist: RiskChecklistConfig
+    allocation: AllocationConfig
 
     @model_validator(mode="after")
     def _check_cross_section(self) -> AppConfig:
@@ -1108,6 +1174,8 @@ class AppConfig(_Model):
             raise ValueError(f"industry groups used by frameworks are undefined: {used - groups}")
         if not getattr(self.markets, self.general.default_market).enabled:
             raise ValueError(f"default_market '{self.general.default_market}' is not enabled")
+        if set(self.allocation.profiles) != set(self.research_score.preferences.options):
+            raise ValueError("allocation.profiles must name every research_score preference")
         return self
 
 

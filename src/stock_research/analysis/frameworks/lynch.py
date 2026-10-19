@@ -8,6 +8,7 @@ would be meaningless and is never forced.
 from __future__ import annotations
 
 from stock_research.analysis.frameworks.base import (
+    NEGATIVE_EPS,
     FrameworkInputs,
     FrameworkResult,
     Outcome,
@@ -31,9 +32,9 @@ def eps_cagr(inputs: FrameworkInputs) -> tuple[float | None, str]:
         return None, note
     first, last = years["eps"].iloc[0], years["eps"].iloc[-1]
     if first <= 0 or last <= 0:
-        return None, f"{note}: EPS {first:.2f} -> {last:.2f} (<= 0)"
+        return None, f"{note}；期初或期末 EPS ≤ 0，成長率無意義"
     periods = len(years) - 1
-    return (last / first) ** (1 / periods) - 1.0, f"{note}: EPS {first:.2f} -> {last:.2f}"
+    return (last / first) ** (1 / periods) - 1.0, note
 
 
 def _peg(inputs: FrameworkInputs):
@@ -45,12 +46,12 @@ def _peg(inputs: FrameworkInputs):
     if v is None:
         return insufficient(key, name, inputs.valuation_problem or "no valuation")
     if v.eps_ttm <= 0:
-        return not_applicable(key, name, f"TTM EPS {v.eps_ttm:.2f} <= 0")
+        return not_applicable(key, name, NEGATIVE_EPS)
     growth, detail = eps_cagr(inputs)
     if growth is None:
         return not_applicable(key, name, detail)
     if growth <= 0:
-        return not_applicable(key, name, f"{detail}; growth {growth:.2%} <= 0")
+        return not_applicable(key, name, f"{detail}；EPS 年複合成長率 {growth:.2%} ≤ 0")
     peg = v.pe / (growth * 100)
     maximum = inputs.config.frameworks.lynch.peg_max
     return scored(
@@ -59,7 +60,7 @@ def _peg(inputs: FrameworkInputs):
         Outcome.PASS if peg < maximum else Outcome.FAIL,
         peg,
         f"PEG < {maximum:g}",
-        f"P/E {v.pe:.2f} / CAGR {growth:.2%}; {detail}",
+        f"本益比 {v.pe:.2f} ÷ EPS 年複合成長率 {growth:.2%}；{detail}",
     )
 
 

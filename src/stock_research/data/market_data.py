@@ -31,7 +31,12 @@ import requests
 from stock_research.config import AppConfig, KnownSuspension, ManualClosure, Secrets
 from stock_research.data.adjustment import AdjustedPrices, adjust_prices
 from stock_research.data.cache import Cache
-from stock_research.data.early_changes import UncoveredCapitalChange, uncovered_capital_changes
+from stock_research.data.early_changes import (
+    UncoveredCapitalChange,
+    UncoveredLimitBreaks,
+    uncovered_capital_changes,
+    uncovered_limit_breaks,
+)
 from stock_research.data.errors import (
     AnomalyError,
     DataValidationError,
@@ -62,6 +67,7 @@ from stock_research.data.validation import (
     check_monthly_revenue,
     check_price_completeness,
     check_price_limits,
+    unpriced_days,
 )
 from stock_research.markets.calendar import (
     CalendarConflictError,
@@ -152,6 +158,7 @@ class _Memo:
     raw: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = field(default_factory=dict)
     daily: dict[str, pd.DataFrame] = field(default_factory=dict)
     uncovered: dict[str, list[UncoveredCapitalChange]] = field(default_factory=dict)
+    limit_breaks: dict[str, UncoveredLimitBreaks | None] = field(default_factory=dict)
     risk_free: RiskFreeRates | None = None
     official_listing: dict[str, date] | None = None
 
@@ -194,7 +201,8 @@ class MarketData:
             try:
                 fetched = self._cbc.rates()
             except SourceUnavailableError as exc:
-                rates = replace(rates, source=f"{rates.source}；央行檔本次無法讀取（{exc.actual}）")
+                kind = str(exc.actual).split(":", 1)[0][:40]  # e.g. ProxyError; not the URL
+                rates = replace(rates, source=f"{rates.source}；央行檔本次無法讀取（{kind}）")
             else:
                 extended = extend_with_cbc(rates.rates, fetched)
                 rates = replace(
@@ -332,14 +340,20 @@ class MarketData:
         """The day the stock started trading as a listed share, or None if it first traded
         before the emerging board existed (so the data holds no pre-listing prices).
 
-        Order: a config override; else, for a stock that first traded on or after the
-        emerging board's start, the first TaiwanStockPER day on or after its first trade
-        (codes are reused, so earlier valuation days may belong to another company). That day
-        is only meaningful after the valuation dataset's coverage starts; otherwise it raises.
+        Order: a config override; else, for a listed TPEx stock, TPEx's own listing date
+        (FinMind's TPEx valuation days only start in 2007 and can lag a listing by months);
+        else, for a stock that first traded on or after the emerging board's start, the first
+        TaiwanStockPER day on or after its first trade (codes are reused, so earlier valuation
+        days may belong to another company). That day is only meaningful after the valuation
+        dataset's coverage starts; otherwise it raises.
         """
         overrides = {o.ticker: o.listing_date for o in self._tw.listing.overrides}
         if ticker.code in overrides:
             return overrides[ticker.code]
+        if ticker.market is Market.TPEX and ticker.code not in self.delisting_dates():
+            official = self.official_listing_date(ticker)
+            if official is not None:
+                return official
         first_traded = min(self.raw_daily(ticker)["date"])
         if first_traded < self._tw.listing.emerging_board_start:
             return None
@@ -399,7 +413,11 @@ class MarketData:
         return self._memo.official_listing.get(ticker.code)
 
     def prices(self, ticker: Ticker, as_of: date) -> AdjustedPrices:
-        """Listed-period prices from ``price_history_start`` on, adjusted as of ``as_of``."""
+        """Listed-period prices from ``price_history_start`` on, adjusted as of ``as_of``.
+
+        Before FinMind's event coverage (2011) the history starts after the last unexplained
+        halt or move beyond the limit instead (``data/early_changes.py``).
+        """
         raw, events = self._raw_prices(ticker)
         listing = self.listing_date(ticker)
         start = self._config.data_sources.finmind.price_history_start
@@ -412,6 +430,17 @@ class MarketData:
         uncovered = self.uncovered_capital_changes(ticker, raw, events, as_of)
         if uncovered:
             raw = raw.loc[pd.to_datetime(raw["date"]) >= pd.Timestamp(uncovered[-1].resumed)]
+        adjusted = adjust_prices(ticker.code, raw.reset_index(drop=True), events, as_of)
+        breaks = uncovered_limit_breaks(
+            adjusted,
+            coverage_start=self._config.data_sources.finmind.capital_reduction_coverage_start,
+            limits=self._tw.price_limits,
+            listing_date=listing,
+        )
+        self._memo.limit_breaks[ticker.code] = breaks
+        if breaks is None:
+            return adjusted
+        raw = raw.loc[pd.to_datetime(raw["date"]) >= pd.Timestamp(breaks.last)]
         return adjust_prices(ticker.code, raw.reset_index(drop=True), events, as_of)
 
     def uncovered_capital_changes(
@@ -522,7 +551,9 @@ class MarketData:
         """Share multipliers from the price events applied as of ``as_of``.
 
         The basis starts at the IFRS start. Par at that date is TPEx's official par (TPEx
-        stocks, backed out through every later split) or the configured default (TWSE).
+        stocks, backed out through every later split) or the configured default (TWSE, and
+        delisted TPEx stocks, which TPEx no longer lists); the share-count check then catches
+        a wrong default.
         """
         per_share = self._tw.per_share
         start = date(self._config.general.ifrs_start_year, 1, 1)
@@ -531,15 +562,16 @@ class MarketData:
         if ticker.market is Market.TPEX and self._tpex is not None:
             companies = self._tpex.listed_companies()
             row = companies.loc[companies["code"] == ticker.code]
-            if row.empty:
+            if row.empty and ticker.code not in self.delisting_dates():
                 raise MissingDataError(ticker.code, "tpex:par_value", "absent", "a TPEx listing")
-            all_events = self.prices(ticker, self.today()).events
-            splits = all_events.loc[
-                (all_events["kind"] == EventKind.SPLIT.value)
-                & np.array([d >= start for d in all_events["effective_date"]], dtype=bool)
-            ]
-            ratio = float((splits["close_before"] / splits["reference_price"]).prod())
-            initial_par = float(row["par_value"].iloc[0]) * ratio
+            if not row.empty:
+                all_events = self.prices(ticker, self.today()).events
+                splits = all_events.loc[
+                    (all_events["kind"] == EventKind.SPLIT.value)
+                    & np.array([d >= start for d in all_events["effective_date"]], dtype=bool)
+                ]
+                ratio = float((splits["close_before"] / splits["reference_price"]).prod())
+                initial_par = float(row["par_value"].iloc[0]) * ratio
         return share_basis(
             ticker.code,
             events,
@@ -565,11 +597,19 @@ class MarketData:
         if calendar is None or ticker is None:
             return report
         if ticker.market is Market.TPEX and self._tpex is not None:
-            _attempt(report, "listing.official_tpex", lambda: self._check_tpex_listing(ticker))
+            note = _attempt(
+                report, "listing.official_tpex", lambda: self._check_tpex_listing(ticker)
+            )
+            if note:
+                report.limitations.append(note)
         prices = _attempt(report, "prices.fetch_and_adjust", lambda: self.prices(ticker, as_of))
         if prices is not None:
+            breaks = self._memo.limit_breaks.get(ticker.code)
             for change in self._memo.uncovered.get(ticker.code, []):
-                report.limitations.append(change.describe(ticker.code))
+                if breaks is None or change.resumed >= breaks.last:  # one start date only
+                    report.limitations.append(change.describe(ticker.code))
+            if breaks is not None:
+                report.limitations.append(breaks.describe(ticker.code))
             self._price_checks(report, ticker, prices, calendar, as_of, now, cross_source)
         bench = _attempt(report, "benchmark.fetch", lambda: self.benchmark(as_of))
         if bench is not None:
@@ -619,11 +659,18 @@ class MarketData:
             )
         return report
 
-    def _check_tpex_listing(self, ticker: Ticker) -> None:
-        """The derived listing date must match TPEx's official one."""
+    def _check_tpex_listing(self, ticker: Ticker) -> str | None:
+        """The listing date in use must match TPEx's official one; returns a note when there
+        is nothing to compare (a delisted stock)."""
         assert self._tpex is not None
         companies = self._tpex.listed_companies()
         row = companies.loc[companies["code"] == ticker.code]
+        if row.empty and ticker.code in self.delisting_dates():
+            # TPEx lists current companies only: nothing to compare a delisted one with.
+            return (
+                f"{ticker.code}：已下櫃，櫃買中心不再列出，上櫃日無法與官方比對，"
+                "面額用預設值（由股數交叉驗證把關）。"
+            )
         if row.empty:
             raise MissingDataError(ticker.code, "tpex:listed_companies", "absent", "a TPEx listing")
         official = row["listing_date"].iloc[0]
@@ -640,6 +687,7 @@ class MarketData:
                 f"derived {derived or 'before the emerging board'}, TPEx {official}",
                 "the official TPEx listing date (add a listing override if TPEx is right)",
             )
+        return None
 
     def _price_checks(
         self,
@@ -653,7 +701,7 @@ class MarketData:
     ) -> None:
         code = ticker.code
         raw = prices.raw
-        latest = max(raw["date"])
+        latest = max(raw.loc[raw["close"].notna(), "date"])  # a day without a price is stale
         report.add_source(SourceStatus("finmind:TaiwanStockPrice", now, latest))
         halts = [
             KnownSuspension(ticker=code, start=start, end=end, reason=f"{kind} share re-issue")
@@ -663,7 +711,12 @@ class MarketData:
             report,
             "prices.completeness",
             lambda: check_price_completeness(
-                code, raw, calendar, [*self._tw.known_suspensions, *halts]
+                code,
+                raw,
+                calendar,
+                [*self._tw.known_suspensions, *halts],
+                unpriced_max_run_days=self._tw.data_validation.unpriced_max_run_days,
+                unpriced_max_volume_share=self._tw.data_validation.unpriced_max_volume_share,
             ),
         )
         traded = raw.loc[raw["close"].notna()]
@@ -680,6 +733,7 @@ class MarketData:
                 listing_date=listing,
                 ex_rights_reference=prices.ex_rights_reference(),
                 capital_change_resumptions=prices.capital_change_resumptions(),
+                unpriced_days=unpriced_days(raw),
             ),
         )
         _attempt(

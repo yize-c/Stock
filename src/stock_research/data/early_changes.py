@@ -7,8 +7,12 @@ jumps beyond the daily limit, but a small reduction may not. Whether the share c
 cannot be checked without the missing data, so prices before such a resumption are not used:
 the stock's price history starts on the resumption day, and the data-health report says so.
 
-Only unexplained multi-day halts are handled. A limit breach without a halt still fails the
-price checks (fail loudly); unusual cases go to ``markets.tw.price_history_overrides``.
+Only unexplained multi-day halts are handled here. A move beyond the daily limit without a
+halt is handled by ``uncovered_limit_breaks``: before the same coverage start FinMind also
+misses ex-rights results (the 2007 ex-dividend season, for one), so such a move is not
+investigated; the price history starts on the last one (user decision 2026-10-19). From the
+coverage start on, a limit breach still fails the price checks (fail loudly); unusual cases
+go to ``markets.tw.price_history_overrides``.
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ from typing import Protocol
 import pandas as pd
 
 from stock_research.config import PriceLimitConfig
+from stock_research.data.adjustment import AdjustedPrices
+from stock_research.data.validation import price_limit_breaches, unpriced_days
 from stock_research.markets.price_limits import limit_on
 
 # A gap of at most this many calendar days (a weekend) cannot hide a missing trading day.
@@ -83,3 +89,49 @@ def uncovered_capital_changes(
         beyond = abs(move) > limit_on(day, limits) + tolerance
         found.append(UncoveredCapitalChange(missing[0], len(missing), day, move, beyond))
     return found
+
+
+@dataclass(frozen=True)
+class UncoveredLimitBreaks:
+    """Moves beyond the daily limit before ``coverage_start`` that no event explains."""
+
+    count: int
+    last: date  # the price history starts here
+    move: float  # that day's close against its reference
+
+    def describe(self, code: str) -> str:
+        return (
+            f"{code}：{self.last} 前的股價未使用。在此之前有 {self.count} 次漲跌幅超限無法以"
+            f"除權息或減資事件解釋（最後一次 {self.move:+.1%}）；FinMind 缺部分 2011 年前的"
+            "除權息與減資資料，無法還原，因此股價從這天起算。"
+        )
+
+
+def uncovered_limit_breaks(
+    prices: AdjustedPrices,
+    *,
+    coverage_start: date,
+    limits: PriceLimitConfig,
+    listing_date: date | None,
+) -> UncoveredLimitBreaks | None:
+    """Limit breaches among ``prices``' days before ``coverage_start``, or None."""
+    raw = prices.raw
+    days = pd.to_datetime(raw["date"]).dt.date
+    if raw.empty or min(days) >= coverage_start:
+        return None
+    early = raw.loc[(days < coverage_start).to_numpy()]
+    traded = early.loc[early["close"].notna()]
+    if listing_date is not None and len(traded) and listing_date < min(traded["date"]):
+        listing_date = None  # listed before the prices start: no exempt days in range
+    breaches = price_limit_breaches(
+        traded,
+        limits,
+        listing_date=listing_date,
+        ex_rights_reference=prices.ex_rights_reference(),
+        capital_change_resumptions=prices.capital_change_resumptions(),
+        unpriced_days=unpriced_days(early),
+    )
+    if not breaches:
+        return None
+    last, result = breaches[-1]
+    return UncoveredLimitBreaks(len(breaches), last, result.change)

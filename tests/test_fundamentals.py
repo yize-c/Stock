@@ -207,3 +207,20 @@ def test_valuation_needs_a_price_and_published_eps(quarterly) -> None:
         valuation_snapshot("2330", date(2017, 2, 1), prices, quarterly, dividends, NO_EVENTS)
     with pytest.raises(MissingDataError, match="four published quarters"):
         valuation_snapshot("2330", date(2017, 3, 1), prices, quarterly, dividends, NO_EVENTS)
+
+
+def test_parent_net_income_without_a_parent_line() -> None:
+    """No parent line (no non-controlling interests): net income less the NCI share."""
+    end = date(2019, 3, 31)
+
+    def line(statement, item, value):
+        return {"statement": statement, "item": item, "period_end": end, "value": value,
+                "available_date": date(2019, 5, 15)}  # fmt: skip
+
+    rows = [line("income", "IncomeAfterTaxes", 50.0), line("balance", "Equity", 400.0)]
+    table = quarterly_table(pd.DataFrame(rows), "x")
+    assert table.loc[end, "net_income_parent"] == 50.0
+    nci = quarterly_table(
+        pd.DataFrame([*rows, line("income", "NoncontrollingInterests", 5.0)]), "x"
+    )
+    assert nci.loc[end, "net_income_parent"] == 45.0

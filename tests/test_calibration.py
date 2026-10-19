@@ -22,9 +22,10 @@ def _config(**changes):
 
 
 def test_base_dates_are_month_ends_up_to_the_last_one() -> None:
-    dates = pipeline.base_dates(CONFIG.calibration)
-    assert dates[0] == date(2021, 6, 30) and dates[-1] == date(2025, 9, 30)
-    assert len(dates) == 52
+    dates = pipeline.base_dates(CONFIG.calibration)  # scored: to the last strategy rebalance
+    assert dates[0] == date(2021, 6, 30) and dates[-1] == date(2026, 6, 30)
+    calibration = pipeline.calibration_dates(CONFIG.calibration)  # their horizon has passed
+    assert calibration[-1] == date(2025, 9, 30) and len(calibration) == 52
 
 
 class _Market:
@@ -100,7 +101,7 @@ def _rows(slope: float, in_sample_slope: float | None = None) -> tuple[pd.DataFr
     rng = np.random.default_rng(0)
     rows, bench = [], []
     oos_start = CONFIG.calibration.out_of_sample_start
-    for base in pipeline.base_dates(CONFIG.calibration):
+    for base in pipeline.calibration_dates(CONFIG.calibration):
         step = slope if in_sample_slope is None or base >= oos_start else in_sample_slope
         bench.append({"base_date": base, "etf_gross": 0.05, "etf_close": 150.0, "rf": 0.015})
         for i in range(10):
@@ -111,6 +112,10 @@ def _rows(slope: float, in_sample_slope: float | None = None) -> tuple[pd.DataFr
                     "status": "OK",
                     "score": 40 + 4 * i + rng.normal(0, 0.1),
                     "gross": -0.05 + step * i + rng.normal(0, 0.01),
+                    # Higher scores fell less and grew faster (validations a and b).
+                    "mdd_fwd": -0.40 + 0.03 * i + rng.normal(0, 0.005),
+                    "eps_growth_fwd": -0.10 + 0.04 * i + rng.normal(0, 0.01),
+                    "revenue_growth_fwd": 0.30 - 0.03 * i + rng.normal(0, 0.01),  # worse
                     "delisted_in_horizon": False,
                 }
             )
@@ -173,6 +178,57 @@ def test_rows_scored_with_an_older_definition_are_refused() -> None:
     old = rows.drop(columns=["score_conservative", "score_balanced", "score_aggressive"])
     with pytest.raises(summary.RowsError, match="older score definition"):
         summary.summarize(old, _screen(rows), bench, CONFIG, datetime(2026, 10, 17, tzinfo=UTC))
+    no_outcomes = rows.drop(columns=list(pipeline.OUTCOME_COLUMNS))
+    with pytest.raises(summary.RowsError, match="條件符合度"):
+        summary.summarize(
+            no_outcomes, _screen(rows), bench, CONFIG, datetime(2026, 10, 17, tzinfo=UTC)
+        )
+
+
+def test_validations_a_and_b_use_group_medians_and_return_is_only_recorded() -> None:
+    config = _config(groups=5, bootstrap_draws=20)
+    rows, bench = _rows(-0.02)  # higher scores earned less: c fails, but it decides nothing
+    result = summary.summarize(
+        rows, _screen(rows), bench, config, datetime(2026, 10, 17, tzinfo=UTC)
+    )
+    checks = result["validations"]
+    assert checks["drawdown"]["passed"] and checks["drawdown"]["gating"]
+    assert checks["drawdown"]["rank_correlation"] == pytest.approx(1.0)
+    assert checks["eps_growth"]["passed"]
+    assert not checks["revenue_growth"]["passed"]  # higher scores grew revenue less
+    assert "最高分組" in checks["revenue_growth"]["reason"]
+    assert not checks["returns"]["passed"] and not checks["returns"]["gating"]
+    assert result["passed_any"]  # a and b(EPS) passed
+    top = checks["drawdown"]["table"][-1]["out_of_sample"]
+    assert top["ci_low"] <= top["median"] <= top["ci_high"] and top["n"] == 2 * 21
+    left_out = checks["eps_growth"]["without_outcome"]  # survivorship check on b
+    assert left_out["rows"] == 0 and left_out["of_scored"] > 0
+    strategy = {"gating": True, "passed": False, "reason": "樣本外未通過"}
+    with_strategy = summary.summarize(
+        rows,
+        _screen(rows),
+        bench,
+        config,
+        datetime(2026, 10, 17, tzinfo=UTC),
+        strategies={"conservative": strategy},
+    )
+    assert with_strategy["validations"]["strategy"] == strategy
+
+
+def test_only_out_of_sample_decides_validation_a() -> None:
+    """In sample higher scores fell less; out of sample they fell more: a fails."""
+    config = _config(groups=5, bootstrap_draws=20)
+    rows, bench = _rows(0.02)
+    oos = np.array([d >= CONFIG.calibration.out_of_sample_start for d in rows["base_date"]])
+    rank = rows["code"].str[-1].astype(float).to_numpy()
+    rows.loc[oos, "mdd_fwd"] = -0.10 - 0.03 * rank[oos]
+    checks = summary.summarize(
+        rows, _screen(rows), bench, config, datetime(2026, 10, 17, tzinfo=UTC)
+    )["validations"]
+    drawdown = checks["drawdown"]
+    ins = [e["in_sample"]["median"] for e in drawdown["table"]]
+    assert ins == sorted(ins)  # in sample: the higher the group, the smaller the fall
+    assert not drawdown["passed"] and "最高分組" in drawdown["reason"]
 
 
 def test_overfitting_warning_compares_in_and_out_of_sample_spreads() -> None:
@@ -243,6 +299,17 @@ def test_cli_score_and_summarize(monkeypatch, tmp_path, raw_config, write_config
         pipeline, "score_shard", lambda md, cfg, kept, delisted, shard, shards, progress: rows
     )
     monkeypatch.setattr(summary, "benchmarks", lambda md, cfg, dates: bench)
+    from stock_research.calibration import backtest
+
+    monkeypatch.setattr(
+        backtest,
+        "run",
+        lambda rows, column, md, cfg, delisted: {
+            "gating": True,
+            "passed": column == "score_conservative",
+            "reason": None,
+        },
+    )
     runner = CliRunner()
     assert runner.invoke(cli.app, ["calibration", "liquidity", "--config", path]).exit_code == 0
     result = runner.invoke(
@@ -251,5 +318,127 @@ def test_cli_score_and_summarize(monkeypatch, tmp_path, raw_config, write_config
     assert result.exit_code == 0, result.output
     result = runner.invoke(cli.app, ["calibration", "summarize", "--config", path])
     assert result.exit_code == 0, result.output
-    assert "[conservative] gate passed: True" in result.output
-    assert summary.load(tmp_path / "score_calibration.json")["passed"] is True
+    assert "[conservative] returns (recorded): passed True" in result.output
+    assert "[conservative] strategy (gating): passed True" in result.output
+    assert "[aggressive] strategy (gating): passed False" in result.output
+    saved = summary.load(tmp_path / "score_calibration.json")
+    assert saved["passed"] is True and saved["schema"] == 3 and saved["passed_any"] is True
+
+
+def _daily(values: list[float], start: str = "2024-01-01") -> pd.Series:
+    days = [d.date() for d in pd.bdate_range(start, periods=len(values))]
+    return pd.Series(values, index=days, dtype=float)
+
+
+def test_forward_drawdown_is_the_worst_fall_inside_the_horizon() -> None:
+    prices = _daily([100, 110, 88, 95, 120] + [120] * 300)  # peak 110, trough 88: -20%
+    base = prices.index[0]
+    assert pipeline.forward_drawdown(prices, base, 12) == pytest.approx(-0.20)
+    # Halted or delisted inside the horizon: counts to the last close (not dropped).
+    assert pipeline.forward_drawdown(prices.iloc[:4], base, 12) == pytest.approx(-0.20)
+    assert pipeline.forward_drawdown(prices.iloc[:1], base, 12) is None  # nothing after base
+
+
+def _ttm(rows: list[tuple[str, str, float]]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"period_end": date.fromisoformat(e), "available_date": date.fromisoformat(a), "eps": v}
+            for e, a, v in rows
+        ]  # fmt: skip
+    )
+
+
+def test_forward_eps_growth_compares_what_was_known_a_year_apart() -> None:
+    ttm = _ttm(
+        [
+            ("2024-03-31", "2024-05-15", 2.0),
+            ("2024-06-30", "2024-08-14", 2.5),  # not yet known at 2024-06-30
+            ("2025-03-31", "2025-05-15", 3.0),
+            ("2025-06-30", "2025-08-14", 4.0),  # not yet known at 2025-06-30
+        ]
+    )
+    base = date(2024, 6, 30)
+    assert pipeline.forward_eps_growth(ttm, base, 12, date(2026, 1, 1)) == pytest.approx(0.5)
+    assert pipeline.forward_eps_growth(ttm, base, 12, date(2025, 3, 1)) is None  # not yet
+    losses = ttm.assign(eps=[-1.0, -1.0, 3.0, 4.0])
+    assert pipeline.forward_eps_growth(losses, base, 12, date(2026, 1, 1)) is None
+    # A late filing: a year later only the 2024Q4 TTM is known, three quarters on, not four.
+    late = ttm.iloc[[0]].assign(available_date=[date(2024, 5, 15)])
+    late = pd.concat([late, _ttm([("2024-12-31", "2025-03-31", 3.0)])], ignore_index=True)
+    assert pipeline.forward_eps_growth(late, base, 12, date(2026, 1, 1)) is None
+
+
+def test_forward_revenue_growth_needs_every_month() -> None:
+    months = pd.period_range("2023-07", "2025-06", freq="M")
+    revenue = pd.DataFrame(
+        {
+            "period_end": [m.end_time.date() for m in months],
+            "available_date": [(m + 1).start_time.date().replace(day=10) for m in months],
+            "value": [100.0] * 12 + [130.0] * 12,
+        }
+    )
+    base, last = date(2024, 6, 30), date(2025, 8, 1)
+    assert pipeline.forward_revenue_growth(revenue, base, 12, last) == pytest.approx(0.30)
+    assert pipeline.forward_revenue_growth(revenue.iloc[:-1], base, 12, last) is None
+    assert pipeline.forward_revenue_growth(revenue, base, 12, date(2025, 7, 1)) is None
+
+
+class _Checks:
+    """health_report stand-in: data fail from ``broken`` on (a later bad price, say)."""
+
+    def __init__(self, broken: date | None) -> None:
+        self.broken, self.asked = broken, []
+
+    def health_report(self, code, as_of, cross_source=True):
+        self.asked.append(as_of)
+        bad = self.broken is not None and as_of >= self.broken
+        check = SimpleNamespace(name="prices.price_limits", passed=not bad)
+        return SimpleNamespace(passed=not bad, checks=[check])
+
+
+def test_a_data_failure_only_excludes_base_dates_whose_window_reaches_it() -> None:
+    dates = [date(2023, 1, 31), date(2024, 1, 31), date(2025, 1, 31)]
+    last = date(2026, 10, 16)
+    clean = _Checks(None)
+    problems, through = pipeline.data_check_scope(clean, "1234", dates, 12, last)
+    assert problems == dict.fromkeys(dates) and through == last and clean.asked == [last]
+    checks = _Checks(date(2025, 6, 1))
+    problems, through = pipeline.data_check_scope(checks, "1234", dates, 12, last)
+    assert problems[date(2023, 1, 31)] is None and problems[date(2024, 1, 31)] is None
+    assert problems[date(2025, 1, 31)] == "data checks failed: prices.price_limits"
+    assert through == date(2025, 1, 31)  # 2024-01-31 + 12 months, the latest passing day
+    always = _Checks(date(2000, 1, 1))
+    problems, through = pipeline.data_check_scope(always, "1234", dates, 12, last)
+    assert all(p is not None for p in problems.values()) and through is None
+
+
+def test_score_shard_scores_only_the_dates_whose_data_passed(
+    raw_config, write_config, monkeypatch
+) -> None:
+    from tests.test_market_data import AS_OF, TSMC_LISTING, build_market_data
+
+    raw_config["markets"]["tw"]["listing"]["overrides"] = [TSMC_LISTING]
+    config = load_config(write_config(raw_config))
+    calibration = config.calibration.model_copy(update={"data_as_of": AS_OF, "horizon_months": 1})
+    config = config.model_copy(update={"calibration": calibration})
+    md, _ = build_market_data(config)  # fixture prices cover 2026 only: a 1-month horizon
+    real = md.health_report
+    broken = date(2026, 9, 15)  # e.g. a bad close then: only windows reaching it fail
+
+    def health(code, as_of, cross_source=True):
+        report = real(code, as_of, cross_source=cross_source)
+        if as_of >= broken:
+            report.checks.append(SimpleNamespace(name="prices.price_limits", passed=False))
+        return report
+
+    monkeypatch.setattr(md, "health_report", health)
+    bases = [date(2026, 7, 31), date(2026, 8, 31)]
+    kept = pd.DataFrame({"code": ["2330", "2330"], "base_date": bases})
+    rows = pipeline.score_shard(md, config, kept, {}, 0, 1).set_index("base_date")
+    failed = rows.loc[date(2026, 8, 31)]
+    assert failed["status"] == "DATA_CHECK_FAILED" and "price_limits" in failed["reason"]
+    ok = rows.loc[date(2026, 7, 31)]
+    assert ok["status"] in ("OK", "NO_SCORE") and ok["reason"] != failed["reason"]
+    assert {f"score_{k}" for k in config.research_score.preferences.options} <= set(rows)
+    assert np.isfinite(ok["mdd_fwd"]) and ok["mdd_fwd"] <= 0  # prices through 2026-08-31
+    assert set(pipeline.OUTCOME_COLUMNS) | {"outcome_problem"} <= set(rows.columns)

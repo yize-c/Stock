@@ -496,6 +496,7 @@ def _tpex_routes() -> tuple[dict, dict]:
     for (dataset, data_id), value in list(routes.items()):
         if data_id == "2330":
             routes[(dataset, "6488")] = value
+    routes[("TaiwanStockDelisting", None)] = [{"date": "2020-01-02", "stock_id": "1999"}]
     tpex = {
         f"{BASE_URL}/mopsfin_t187ap03_O": "tpex_listed_companies.json",
         f"{BASE_URL}/tpex_mainboard_daily_close_quotes": "tpex_daily_close_quotes.json",
@@ -518,6 +519,31 @@ def test_tpex_listing_checked_against_official(make) -> None:
     result = {c.name: c for c in md.health_report("6488", AS_OF).checks}
     assert not result["listing.official_tpex"].passed
     assert "2015-09-25" in result["listing.official_tpex"].detail
+
+
+def test_tpex_stocks_take_the_official_listing_date(make) -> None:
+    """FinMind's TPEx valuation days start in 2007 and can lag a listing by months, so a
+    listed TPEx stock without an override gets TPEx's own date."""
+    routes, tpex = _tpex_routes()
+    md, _ = make(routes, yahoo=yahoo_like("6488", routes), tpex_routes=tpex)
+    assert md.listing_date(Ticker("6488", Market.TPEX)) == date(2015, 9, 25)
+    result = {c.name: c for c in md.health_report("6488", AS_OF).checks}
+    assert result["listing.official_tpex"].passed
+
+
+def test_a_delisted_tpex_stock_is_noted_and_takes_the_default_par(make) -> None:
+    """TPEx lists current companies only: a delisted one is not compared, the report says
+    so, and its par is the configured default (the share-count check backs it up)."""
+    routes, tpex = _tpex_routes()
+    routes[("TaiwanStockDelisting", None)] = [{"date": "2026-10-20", "stock_id": "6488"}]
+    md, _ = make(routes, yahoo=yahoo_like("6488", routes), tpex_routes=tpex)
+    companies = md._tpex.listed_companies()
+    md._tpex.listed_companies = lambda: companies.loc[companies["code"] != "6488"]
+    ticker = Ticker("6488", Market.TPEX)
+    assert "已下櫃" in md._check_tpex_listing(ticker)
+    assert md.share_basis(ticker, AS_OF).initial_par == md._tw.per_share.default_par_value
+    report = md.health_report("6488", AS_OF, cross_source=False)
+    assert any("已下櫃" in note for note in report.limitations)
 
 
 def test_health_report_benchmark_gap_and_missing_balance_totals(make) -> None:
@@ -632,7 +658,7 @@ def test_listing_date_falls_back_to_the_official_one(make) -> None:
         prices=lambda code, start, end: pd.DataFrame({"date": days, "close": [10.0, 10.5]}),
         valuation_dates=lambda code, start, end: [date(2005, 9, 2), date(2005, 9, 5)],
     )
-    ticker = SimpleNamespace(code="4904")
+    ticker = Ticker("4904", Market.TWSE)
     with pytest.raises(MissingDataError, match="official listing date"):
         md.listing_date(ticker)
     routes = {LISTED_COMPANIES: "twse_t187ap03_L.json"}

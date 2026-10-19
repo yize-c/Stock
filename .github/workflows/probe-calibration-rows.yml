@@ -1,8 +1,9 @@
 name: Probe calibration exclusions
 
 # Why the full-market calibration run 39162884540 excluded rows (DATA_CHECK_FAILED, ERROR,
-# NO_SCORE): reads that run's row artifacts and the calibration cache, prints the breakdown.
-# Read-only; prints counts, check names, codes and derived statistics only.
+# NO_SCORE): reads that run's row artifacts and the calibration cache, prints the dated causes
+# (scripts/probe_calibration_followup.py; earlier: probe_calibration_rows.py, _details.py).
+# Read-only; prints dates, counts, check names, labels, codes and derived statistics only.
 on:
   workflow_dispatch:
 
@@ -13,7 +14,7 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -37,5 +38,4 @@ jobs:
         env:
           FINMIND_TOKEN: ${{ secrets.SECOND_FINMIND }}
         run: |
-          uv run stock-research calibration liquidity
-          uv run python scripts/probe_calibration_rows.py
+          uv run python scripts/probe_calibration_followup.py

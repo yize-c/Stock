@@ -5,7 +5,9 @@ previous raw close, but on an ex-rights/ex-dividend day the exchange's ex-rights
 price. Callers pass the correct reference price; this module never adjusts prices itself.
 
 Exemptions: the first ``new_listing_exempt_days`` trading days after listing, and the first
-trading day after resuming from a capital reduction, split or par-value change.
+trading day after resuming from a capital reduction, split or par-value change. After traded
+days whose price the source lacks (``days_without_price``), each of which could have moved by
+the limit, the limit compounds over those days and the checked one.
 """
 
 from __future__ import annotations
@@ -39,6 +41,8 @@ class PriceMove:
     # 1 = listing day. None when unknown/irrelevant (long-listed stock).
     trading_day_since_listing: int | None = None
     resumed_after_capital_change: bool = False
+    # Traded days between the reference and this close with no price in the source.
+    days_without_price: int = 0
 
     def __post_init__(self) -> None:
         if not self.reference_price > 0:
@@ -95,10 +99,15 @@ def check_price_move(move: PriceMove, config: PriceLimitConfig) -> PriceLimitRes
         )
 
     limit = limit_on(move.day, config)
-    allowed = limit + config.rounding_tolerance
+    days = move.days_without_price + 1
+    up = (1 + limit) ** days - 1 + config.rounding_tolerance
+    down = 1 - (1 - limit) ** days + config.rounding_tolerance
+    allowed = up if change > 0 else down
     status = PriceLimitStatus.EXCEEDED if abs(change) > allowed else PriceLimitStatus.WITHIN
     reason = (
         f"{change:+.2%} vs {move.reference_kind.value.lower().replace('_', ' ')} "
-        f"(limit ±{limit:.0%} + {config.rounding_tolerance:.1%} tolerance)"
+        f"(limit ±{limit:.0%} + {config.rounding_tolerance:.1%} tolerance"
+        + (f", compounded over {days} days without a price" if days > 1 else "")
+        + ")"
     )
     return PriceLimitResult(status, change, limit, allowed, reason)

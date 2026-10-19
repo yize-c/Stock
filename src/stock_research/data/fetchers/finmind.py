@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from datetime import date, timedelta
 from enum import StrEnum
 from typing import Any
@@ -433,7 +434,18 @@ def normalize_monthly_revenue(
     return out.sort_values("period_end").reset_index(drop=True)
 
 
-_FISCAL_RE = re.compile(r"^(\d{2,3})年(?:(第[1-4]季)|(前半年度|後半年度))?$")
+# One fiscal period inside a dividend label: a ROC year (107年, 108年度, 109下半年度) and an
+# optional part of it. A label can name several (e.g. 112年度及113年上半年).
+_ROC_YEAR = re.compile(r"(?<!\d)(\d{2,3})(?!\d)")
+_YEAR_SUFFIX = re.compile(r"^年度?")
+_QUARTER = re.compile(r"^第([1-4])季")
+_FIRST_QUARTERS = re.compile(r"^前([1-3])季")
+_FIRST_HALF = re.compile(r"^(?:前|上)半年度?")
+_SECOND_HALF = re.compile(r"^(?:後|下)半年度?")
+# What may follow a period: another period after a joiner, or a description of what was
+# paid (seen in FinMind labels). Anything else (113年3月, 112年1~6月) is not understood.
+_AFTER_PERIOD = re.compile(r"^(?:$|及|、|暨|和|與|/|，|,|\(部分\)|盈餘|資本公積|股票股利|現金股利)")
+_NUMERALS = str.maketrans("一二三四", "1234")
 
 
 # FinMind's label for rows that are not an earnings distribution (e.g. a rights offering).
@@ -443,25 +455,56 @@ NO_FISCAL_PERIOD = "不適用"
 def parse_fiscal_period(
     label: str, ticker: str | None = None
 ) -> tuple[date, date, PeriodType] | None:
-    """ROC fiscal-period labels: ``107年``, ``108年第1季``, ``112年前半年度``/``後半年度``.
+    """ROC fiscal-period labels: ``107年``, ``108年第1季``, ``112年前半年度``/``後半年度``
+    (also 上半年/下半年, ``109年度前三季``; full-width digits and spaces are normalized).
 
-    ``不適用`` (no fiscal period, e.g. a rights offering) returns None.
+    A label that says 不適用 (a rights offering, a cash distribution from capital surplus,
+    FinMind's blank template) returns None. A label naming several periods
+    (``112年度及113年上半年``) counts in its earliest one: a combined distribution is never
+    pushed past a year it covers, which would show that year without dividends. Text after
+    a period that is neither a joiner nor a known description raises.
     """
-    if str(label).strip() == NO_FISCAL_PERIOD:
+    text = "".join(unicodedata.normalize("NFKC", str(label)).split())
+    text = re.sub(
+        r"(第|前)([一二三四])季",
+        lambda m: m.group(1) + m.group(2).translate(_NUMERALS) + "季",
+        text,
+    )
+    if NO_FISCAL_PERIOD in text:
         return None
-    match = _FISCAL_RE.match(str(label).strip())
-    if match is None:
-        raise AnomalyError(ticker, "dividend.year", label, "'NNN年', 'NNN年第Q季' or half-year")
-    year = int(match.group(1)) + 1911
-    if match.group(2):
-        quarter = int(match.group(2)[1])
-        end = _month_end(year, quarter * 3)
-        return date(year, quarter * 3 - 2, 1), end, PeriodType.QUARTER
-    if match.group(3) == "前半年度":
-        return date(year, 1, 1), date(year, 6, 30), PeriodType.YEAR_TO_DATE
-    if match.group(3) == "後半年度":
-        return date(year, 7, 1), date(year, 12, 31), PeriodType.YEAR_TO_DATE
-    return date(year, 1, 1), date(year, 12, 31), PeriodType.ANNUAL
+    periods = []
+    for match in _ROC_YEAR.finditer(text):
+        roc = int(match.group(1))
+        rest = text[match.end() :]
+        suffix = _YEAR_SUFFIX.match(rest)
+        rest = rest[suffix.end() :] if suffix else rest
+        year = roc + 1911
+        if not 50 <= roc <= 199:
+            continue
+        if quarter := _QUARTER.match(rest):
+            q = int(quarter.group(1))
+            period = (date(year, q * 3 - 2, 1), _month_end(year, q * 3), PeriodType.QUARTER)
+            rest = rest[quarter.end() :]
+        elif first := _FIRST_QUARTERS.match(rest):
+            q = int(first.group(1))
+            period = (date(year, 1, 1), _month_end(year, q * 3), PeriodType.YEAR_TO_DATE)
+            rest = rest[first.end() :]
+        elif half := _FIRST_HALF.match(rest):
+            period = (date(year, 1, 1), date(year, 6, 30), PeriodType.YEAR_TO_DATE)
+            rest = rest[half.end() :]
+        elif half := _SECOND_HALF.match(rest):
+            period = (date(year, 7, 1), date(year, 12, 31), PeriodType.YEAR_TO_DATE)
+            rest = rest[half.end() :]
+        elif suffix:
+            period = (date(year, 1, 1), date(year, 12, 31), PeriodType.ANNUAL)
+        else:
+            continue  # a number that is not a year (e.g. inside other text)
+        if not _AFTER_PERIOD.match(rest):
+            raise AnomalyError(ticker, "dividend.year", label, "a known fiscal-period label")
+        periods.append(period)
+    if periods:
+        return min(periods, key=lambda p: p[1])  # the first listed among equal ends
+    raise AnomalyError(ticker, "dividend.year", label, "'NNN年', 'NNN年第Q季' or half-year")
 
 
 def _month_end(year: int, month: int) -> date:

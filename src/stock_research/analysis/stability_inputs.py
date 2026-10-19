@@ -20,6 +20,7 @@ from stock_research.analysis.frameworks.base import FrameworkResult, Outcome
 from stock_research.analysis.fundamentals import Valuation, ttm_table
 from stock_research.analysis.inputs import StockData, inputs_for
 from stock_research.analysis.results import InsufficientHistory
+from stock_research.analysis.revenue import gap_months
 from stock_research.analysis.risk import daily_returns
 from stock_research.analysis.scoring import CompositeScore, composite
 from stock_research.analysis.stability import (
@@ -106,7 +107,9 @@ def _window_data(data: StockData, window: TimeWindow, ttm: pd.DataFrame, crash: 
         returns = _drop_crash_days(returns, config)
         paired = _drop_crash_days(paired, config)
         ttm_rows = _drop_crash_periods(ttm_rows, config)
-        yoy = _drop_crash_periods(yoy, config)
+        # A missing revenue month still marks the window, whichever periods are dropped.
+        kept = _drop_crash_periods(yoy, config).index
+        yoy = yoy.loc[yoy.index.isin(kept) | yoy.get("gap", False)]
     return WindowData(returns, paired, ttm_rows, yoy)
 
 
@@ -145,6 +148,9 @@ def _ttm_sample(rows: pd.DataFrame, column: str) -> Sample:
 
 
 def _yoy_sample(rows: pd.DataFrame) -> Sample:
+    holes = gap_months(rows)
+    if holes:  # a window with a missing revenue month has no YoY sample (user, 2026-10-19)
+        return Sample.missing(f"missing revenue month(s): {holes[0]} and {len(holes) - 1} more")
     values = rows["yoy"].dropna().to_numpy(dtype=float)
     if len(values) == 0:
         return Sample.missing("no YoY month in the window")

@@ -100,6 +100,17 @@ def quarterly_table(financials: pd.DataFrame, ticker: str) -> pd.DataFrame:
         if column in alternative:
             current = income[column] if column in income else pd.Series(dtype=float)
             income[column] = current.combine_first(alternative[column])
+    # Companies without non-controlling interests often report no parent line: then all of
+    # the net income is the parent's. A company that reports an NCI line in some quarter
+    # gets no derived value where that line is missing (it is not assumed to be zero).
+    if "net_income" in income:
+        nci_income = wide("income", {"NoncontrollingInterests": "nci"})
+        if "nci" in nci_income:
+            derived = income["net_income"] - nci_income["nci"].reindex(income.index)
+        else:
+            derived = income["net_income"]
+        current = income.get("net_income_parent", pd.Series(np.nan, index=income.index))
+        income["net_income_parent"] = current.combine_first(derived)
     cash = _decumulate(wide("cash_flow", CASH_FLOW_ITEMS))
     balance = wide("balance", BALANCE_ITEMS)
     borrow = rows.loc[(rows["statement"] == "balance") & rows["item"].isin(BORROWING_ITEMS)]

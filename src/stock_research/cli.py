@@ -347,7 +347,7 @@ def calibration_summarize(
     """Score groups, caps and the gate from all shards; writes calibration.output."""
     import pandas as pd
 
-    from stock_research.calibration import pipeline, summary
+    from stock_research.calibration import backtest, pipeline, summary
 
     cfg = _load(config)
     market_data = _calibration_market(cfg)
@@ -360,7 +360,11 @@ def calibration_summarize(
     rows["base_date"] = pd.to_datetime(rows["base_date"]).dt.date
     screen = pd.read_parquet(work / pipeline.LIQUIDITY_FILE)
     found = pipeline.universe(market_data, cfg)
-    bench = summary.benchmarks(market_data, cfg, pipeline.base_dates(cfg.calibration))
+    bench = summary.benchmarks(market_data, cfg, pipeline.calibration_dates(cfg.calibration))
+    strategies = {
+        key: backtest.run(rows, f"score_{key}", market_data, cfg, found.delisted)
+        for key in cfg.research_score.preferences.options
+    }
     result = summary.summarize(
         rows,
         screen,
@@ -368,11 +372,16 @@ def calibration_summarize(
         cfg,
         market_data.now,
         extra={"universe_codes": len(found.codes), "delisted_codes": len(found.delisted)},
+        strategies=strategies,
     )
     summary.save(result, cfg.calibration.output)
     for key, per in result["preferences"].items():
         gate = per["gate"]
-        typer.echo(f"[{key}] gate passed: {per['passed']} ({gate.get('reason') or 'ok'})")
+        for name, check in per["validations"].items():
+            role = "gating" if check.get("gating") else "recorded"
+            reason = check.get("reason") or "ok"
+            typer.echo(f"[{key}] {name} ({role}): passed {check['passed']} ({reason})")
+        typer.echo(f"[{key}] passed any validation: {per['passed_any']}")
         if per["overfit"]["warning"]:
             typer.echo(f"[{key}] overfitting warning: {per['overfit']['message']}")
         tier = gate["tier"]

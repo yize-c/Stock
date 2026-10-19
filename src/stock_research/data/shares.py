@@ -40,6 +40,8 @@ from stock_research.data.fetchers.finmind import EventKind
 
 _LOSS_OFFSET = "Making up losses"
 _CASH_REFUND = "Cash refund"
+# FinMind labels some (mostly TPEx) reductions in Chinese.
+_REASON_ALIASES = {"彌補虧損": _LOSS_OFFSET, "現金減資": _CASH_REFUND}
 _RIGHTS = "權"  # in 權, 權息, 除權, 除權息: the event changes the share count
 _DIVIDEND = "息"
 
@@ -181,7 +183,7 @@ def _ex_rights_multiplier(
 def _reduction_multiplier(ticker: str, event: dict, par: float) -> float:
     before = float(event["close_before"])
     reference = float(event["reference_price"])
-    reason = event["detail"]
+    reason = _REASON_ALIASES.get(str(event["detail"]).strip(), event["detail"])
     if reason == _LOSS_OFFSET:
         return before / reference
     if reason == _CASH_REFUND:
@@ -237,7 +239,13 @@ def share_counts(financials: pd.DataFrame, basis: ShareBasis) -> tuple[pd.Series
         return rows.set_index(pd.to_datetime(rows["period_end"]).dt.date)["value"].astype(float)
 
     eps = item("income", "EPS")
-    implied = item("income", "EquityAttributableToOwnersOfParent") / eps.where(eps != 0)
+    # Without a parent line: net income less the NCI share, or all of it when the company
+    # never reports an NCI line (a quarter missing a reported NCI line gets no value).
+    net = item("income", "IncomeAfterTaxes").combine_first(item("income", "IncomeAfterTax"))
+    nci = item("income", "NoncontrollingInterests")
+    derived = net - nci.reindex(net.index) if len(nci) else net
+    parent = item("income", "EquityAttributableToOwnersOfParent").combine_first(derived)
+    implied = parent / eps.where(eps != 0)
     capital = item("balance", "OrdinaryShare")
     pars = np.array([basis.par_on(d) for d in capital.index])
     return implied.replace([np.inf, -np.inf], np.nan), capital / pars

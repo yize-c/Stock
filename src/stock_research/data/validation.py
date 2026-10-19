@@ -10,6 +10,7 @@ prices are never cross-checked between sources: each source adjusts differently.
 
 from __future__ import annotations
 
+from bisect import bisect_left, bisect_right
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -29,6 +30,7 @@ from stock_research.data.errors import (
 )
 from stock_research.markets.calendar import TradingCalendar
 from stock_research.markets.price_limits import (
+    PriceLimitResult,
     PriceLimitStatus,
     PriceMove,
     ReferencePriceKind,
@@ -51,9 +53,13 @@ __all__ = [
     "check_monthly_revenue",
     "check_price_completeness",
     "check_price_limits",
+    "price_limit_breaches",
+    "unpriced_days",
 ]
 
 PRICE_COLUMNS = ("open", "high", "low", "close")
+# Kept for completeness but read by no analysis (returns, risk and valuation use closes).
+UNUSED_PRICE_COLUMNS = frozenset({"open", "high", "low"})
 
 
 class IssueSeverity(StrEnum):
@@ -104,11 +110,20 @@ def check_price_completeness(
     prices: pd.DataFrame,
     calendar: TradingCalendar,
     known_suspensions: Iterable[KnownSuspension] = (),
+    *,
+    unpriced_max_run_days: int | None = None,
+    unpriced_max_volume_share: float | None = None,
 ) -> list[ValidationIssue]:
     """Nulls, negatives, zero prices, duplicate days, gaps; returns notices.
 
     Gaps covered by a known suspension of this ticker are expected and reported as a notice;
-    any other gap raises.
+    any other gap raises. A traded day without an open, high or low (FinMind records 0 on
+    some older days) is a warning, not a failure: every analysis uses closes and volume only.
+    A day with volume but no price at all (FinMind; typically a sliver of the usual volume,
+    such as odd lots only) is a warning too and counts as a day without a close (user
+    decision 2026-10-19): nothing is filled in. A run longer than ``unpriced_max_run_days``
+    or volume above ``unpriced_max_volume_share`` of the median priced day looks like a
+    source outage and raises.
     """
     if prices.empty:
         raise MissingDataError(ticker, "prices", "empty", "at least one row")
@@ -123,19 +138,30 @@ def check_price_completeness(
         raise MissingDataError(ticker, "close", "column missing", "a close column")
     volume = pd.to_numeric(prices["volume"], errors="coerce") if "volume" in prices else None
     # A day without trades has zero volume and, on some sources, no prices at all ("---").
-    # That is a real market state, not missing data, as long as *every* price is absent.
+    # That is a real market state, not missing data, as long as *every* price is absent; a
+    # day with volume but no price is treated the same way and reported as a warning.
     no_price = pd.concat(
         [pd.to_numeric(prices[c], errors="coerce").isna() for c in price_cols], axis=1
     ).all(axis=1)
-    priceless_no_trade = (
-        no_price & (volume == 0) if volume is not None else pd.Series(False, index=prices.index)
-    )
+    priceless_no_trade = no_price if volume is not None else pd.Series(False, index=prices.index)
+    issues: list[ValidationIssue] = []
     for col in [*price_cols, "volume"]:
         if col not in prices:
             continue
         values = pd.to_numeric(prices[col], errors="coerce")
         null = values.isna() if col == "volume" else values.isna() & ~priceless_no_trade
-        if null.any():
+        if null.any() and col in UNUSED_PRICE_COLUMNS:
+            issues.append(
+                ValidationIssue(
+                    ticker,
+                    f"missing_{col}",
+                    IssueSeverity.WARNING,
+                    f"{int(null.sum())} traded day(s) without {col} (not used by any analysis; "
+                    f"first {_iso(dates[null])[0]})",
+                    tuple(dates[null]),
+                )
+            )
+        elif null.any():
             raise MissingDataError(ticker, col, _iso(dates[null]), "no null/NaN values")
         negative = values < 0
         if negative.any():
@@ -158,7 +184,6 @@ def check_price_completeness(
     if non_trading:
         raise AnomalyError(ticker, "date", _iso(non_trading), "rows only on trading days")
 
-    issues: list[ValidationIssue] = []
     if suspended:
         reasons = sorted({s.reason for s in suspensions for d in suspended if s.covers(d)})
         issues.append(
@@ -172,9 +197,25 @@ def check_price_completeness(
             )
         )
     if volume is not None:
+        unpriced_mask = no_price & (volume > 0)
+        unpriced = dates[unpriced_mask]
+        _check_unpriced(
+            ticker, dates, unpriced_mask, volume, unpriced_max_run_days, unpriced_max_volume_share
+        )
+        if not unpriced.empty:
+            issues.append(
+                ValidationIssue(
+                    ticker,
+                    "unpriced",
+                    IssueSeverity.WARNING,
+                    f"{len(unpriced)} day(s) with volume but no price (FinMind); counted as "
+                    f"days without a close (first {_iso(unpriced)[0]})",
+                    tuple(unpriced),
+                )
+            )
         no_trades = dates[volume == 0]
         if not no_trades.empty:
-            priceless = int(priceless_no_trade.sum())
+            priceless = int((priceless_no_trade & (volume == 0)).sum())
             issues.append(
                 ValidationIssue(
                     ticker,
@@ -188,35 +229,82 @@ def check_price_completeness(
     return issues
 
 
+def _check_unpriced(
+    ticker: str,
+    dates: pd.Series,
+    unpriced: pd.Series,
+    volume: pd.Series,
+    max_run: int | None,
+    max_share: float | None,
+) -> None:
+    """Raise when days with volume but no price come in long runs or with real volume."""
+    if not unpriced.any():
+        return
+    order = dates.sort_values().index
+    flags, run, longest, start, worst = unpriced.loc[order].to_numpy(), 0, 0, None, None
+    for position, flag in enumerate(flags):
+        run = run + 1 if flag else 0
+        if run == 1:
+            start = dates.loc[order[position]]
+        if run > longest:
+            longest, worst = run, start
+    if max_run is not None and longest > max_run:
+        raise MissingDataError(
+            ticker,
+            "close",
+            f"{longest} consecutive days with volume but no price from {worst}",
+            f"at most {max_run} (longer looks like a source outage)",
+        )
+    priced = volume.loc[~unpriced & (volume > 0)]
+    if max_share is not None and len(priced):
+        share = volume.loc[unpriced] / float(priced.median())
+        if (share > max_share).any():
+            day = dates.loc[share.idxmax()]
+            raise AnomalyError(
+                ticker,
+                "close",
+                f"{day}: volume {share.max():.0%} of the median priced day but no price",
+                f"at most {max_share:.0%} on a day without a price",
+            )
+
+
 # --- price limits -------------------------------------------------------------------------
 
 
-def check_price_limits(
-    ticker: str,
+def unpriced_days(prices: pd.DataFrame) -> list[date]:
+    """Days with volume but no close (counted as days without a close; see completeness)."""
+    if "volume" not in prices:
+        return []
+    volume = pd.to_numeric(prices["volume"], errors="coerce")
+    mask = (volume > 0) & pd.to_numeric(prices["close"], errors="coerce").isna()
+    return sorted(pd.to_datetime(prices.loc[mask, "date"]).dt.date)
+
+
+def price_limit_breaches(
     prices: pd.DataFrame,
     rules: PriceLimitConfig,
     *,
     listing_date: date | None = None,
     ex_rights_reference: Mapping[date, float] | None = None,
     capital_change_resumptions: Iterable[date] = (),
-) -> None:
-    """Raise if a raw close moved beyond the daily limit in force on that day.
+    unpriced_days: Iterable[date] = (),
+) -> list[tuple[date, PriceLimitResult]]:
+    """Every raw close that moved beyond the daily limit in force on that day.
 
-    ``prices`` must be the stock's complete, ordered raw-close history over the checked range
-    (run ``check_price_completeness`` first). ``ex_rights_reference`` maps ex-rights/ex-dividend
-    days to the exchange's reference price. If ``listing_date`` is the first row's date, the
-    first ``new_listing_exempt_days`` rows are exempt.
+    ``prices`` must be the stock's ordered raw closes over the checked range (rows without a
+    close left out). ``ex_rights_reference`` maps ex-rights/ex-dividend days to the
+    exchange's reference price. If ``listing_date`` is the first row's date, the first
+    ``new_listing_exempt_days`` rows are exempt. ``unpriced_days`` are traded days without a
+    price: the limit compounds over those between two closes.
     """
     frame = prices.assign(_d=pd.to_datetime(prices["date"]).dt.date).sort_values("_d")
     days = list(frame["_d"])
     closes = [float(c) for c in frame["close"]]
     references = ex_rights_reference or {}
     resumptions = set(capital_change_resumptions)
+    unpriced = sorted(unpriced_days)
     listed_in_range = bool(days) and days[0] == listing_date
-    if listing_date is not None and days and days[0] < listing_date:
-        raise AnomalyError(ticker, "date", days[0].isoformat(), f">= listing date {listing_date}")
-
-    violations: list[str] = []
+    breaches = []
     for i in range(1, len(days)):
         day = days[i]
         on_ex_day = day in references
@@ -232,12 +320,40 @@ def check_price_limits(
                 ),
                 trading_day_since_listing=i + 1 if listed_in_range else None,
                 resumed_after_capital_change=day in resumptions,
+                days_without_price=bisect_left(unpriced, day) - bisect_right(unpriced, days[i - 1]),
             ),
             rules,
         )
         if result.status is PriceLimitStatus.EXCEEDED:
-            violations.append(f"{day.isoformat()}: {result.reason}")
-    if violations:
+            breaches.append((day, result))
+    return breaches
+
+
+def check_price_limits(
+    ticker: str,
+    prices: pd.DataFrame,
+    rules: PriceLimitConfig,
+    *,
+    listing_date: date | None = None,
+    ex_rights_reference: Mapping[date, float] | None = None,
+    capital_change_resumptions: Iterable[date] = (),
+    unpriced_days: Iterable[date] = (),
+) -> None:
+    """Raise if a raw close moved beyond the daily limit (see ``price_limit_breaches``;
+    run ``check_price_completeness`` first)."""
+    days = pd.to_datetime(prices["date"]).dt.date
+    if listing_date is not None and len(days) and min(days) < listing_date:
+        raise AnomalyError(ticker, "date", min(days).isoformat(), f">= listing date {listing_date}")
+    breaches = price_limit_breaches(
+        prices,
+        rules,
+        listing_date=listing_date,
+        ex_rights_reference=ex_rights_reference,
+        capital_change_resumptions=capital_change_resumptions,
+        unpriced_days=unpriced_days,
+    )
+    if breaches:
+        violations = [f"{day.isoformat()}: {result.reason}" for day, result in breaches]
         raise AnomalyError(ticker, "close", violations[:5], "daily moves within the price limit")
 
 
@@ -316,7 +432,8 @@ def check_balance_sheet(
 def check_monthly_revenue(
     ticker: str, revenue: pd.DataFrame, yoy_abs_max: float
 ) -> list[ValidationIssue]:
-    """Flag zero revenue and |YoY| above ``yoy_abs_max`` for manual confirmation.
+    """Flag zero revenue and |YoY| above ``yoy_abs_max`` for manual confirmation, and list
+    months the source does not report (a warning: windows covering one have no revenue YoY).
 
     ``revenue`` has ``period_end`` (month end) and ``revenue`` columns, one row per month.
     """
@@ -327,6 +444,20 @@ def check_monthly_revenue(
     by_month = frame.set_index("_m")["revenue"].astype(float)
 
     issues: list[ValidationIssue] = []
+    if len(by_month):
+        expected = pd.period_range(by_month.index.min(), by_month.index.max(), freq="M")
+        missing = [m for m in expected if m not in by_month.index]
+        if missing:
+            issues.append(
+                ValidationIssue(
+                    ticker,
+                    "revenue_gap",
+                    IssueSeverity.WARNING,
+                    f"{len(missing)} month(s) without revenue (from {missing[0]}); the windows "
+                    "covering them have no revenue YoY",
+                    tuple(m.end_time.date() for m in missing),
+                )
+            )
     for month, value in by_month.items():
         if value == 0:
             issues.append(
