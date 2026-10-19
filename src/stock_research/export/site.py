@@ -391,6 +391,12 @@ def validation_summaries(calibration: dict[str, Any]) -> list[dict[str, Any]]:
                     f"最高分組中位數 {check['top_median']:+.1%}、"
                     f"最低分組 {check['bottom_median']:+.1%}"
                 )
+            left_out = check.get("without_outcome")
+            if left_out and left_out["rows"]:
+                lines.append(
+                    f"樣本外 {left_out['of_scored']} 筆中有 {left_out['rows']} 筆無法計算結果而不納入"
+                    f"（其中 {left_out['delisted_in_horizon']} 筆在期間內下市）"
+                )
         if check.get("reason"):
             lines.append(f"未通過原因：{check['reason']}")
         out.append(

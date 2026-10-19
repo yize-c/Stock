@@ -3,20 +3,24 @@
 At every rebalance date (every ``rebalance_months`` from ``first_rebalance`` to
 ``last_rebalance``) the strategy holds the ``holdings`` highest base scores among that
 month's scored, liquid stocks, at most ``max_industry_share`` of them from one industry, in
-equal parts. Trades happen at the base date's close (the last trading day on or before it),
-pay the broker fee on both sides and the tax on sales (fractional shares, starting from the
-default capital tier); between rebalances the holdings are left alone. A stock that stops
-trading (a delisting) keeps its last close until it is sold at the next rebalance.
+equal parts; fewer candidates than ``holdings`` is an error, never a silent move to cash.
+Trades happen at the close of the first trading day after the base date (the score may use
+that date's close and statements dated that day), pay the broker fee on both sides and the
+tax on sales (fractional shares, starting from the default capital tier); between rebalances
+the holdings are left alone. A stock that stops trading (a delisting) keeps its last close
+until it is sold at the next rebalance.
 
 0050 with dividends (adjusted closes) is bought once at the same close and held. Each period
-(in sample, out of sample, full) starts afresh with the same capital. Both final values are
-net of one last sale.
+(in sample, out of sample, full) starts afresh with the same capital, and its measures start
+from that capital, so the first purchase's fees count. Both final values are net of one
+last sale.
 
 Measures per period: maximum drawdown (daily), annual return, Sharpe (deposit rate) and the
-share of positive rolling holding periods (``rolling_years_*`` from every month end that
-fits). Out of sample the strategy passes when all four meet the configured criteria; the
-in-sample-to-out-of-sample comparison flags overfitting. Historical statistics only; not a
-forecast and not investment advice.
+share of positive rolling holding periods from every month end that fits: the full period
+uses ``rolling_years_full``; the two shorter periods (about 2.5 and 2.75 years) use
+``rolling_years_out_of_sample``. Out of sample the strategy passes when all four meet the
+configured criteria; the in-sample-to-out-of-sample comparison flags overfitting. Historical
+statistics only; not a forecast and not investment advice.
 """
 
 from __future__ import annotations
@@ -32,12 +36,13 @@ import pandas as pd
 
 from stock_research.analysis.costs import broker_fee
 from stock_research.config import AppConfig, StrategyConfig, add_months
-from stock_research.data.errors import DataValidationError
+from stock_research.data.errors import DataValidationError, MissingDataError
 from stock_research.validation.statistics import overfit_check
 
+_SALE_DAYS = 10  # a pick is sold on the first trading day after the next rebalance date
 LABEL = "策略回測：條件符合度前 {n} 名、單一產業最多 {cap} 檔、每 {m} 個月再平衡，對照含息 0050"
 _LIMITATIONS = [
-    "以零股（可分割股數）模擬，交易在基準日收盤價成交；不計滑價與流動性限制。",
+    "以零股（可分割股數）模擬，交易在基準日之後第一個交易日的收盤價成交；不計滑價與流動性限制。",
     "產業分類用目前的產業別，不是當時的分類。",
     "下市股票以最後收盤價計算，在下一次再平衡時賣出。",
 ]
@@ -127,11 +132,19 @@ def buy_and_hold(etf: pd.Series, days: list[date], capital: float, costs) -> pd.
 
 
 def measures(
-    values: pd.Series, rf_rate: float, rolling_years: int, annualization_days: int
+    values: pd.Series,
+    rf_rate: float,
+    rolling_years: int,
+    annualization_days: int,
+    start_value: float | None = None,
 ) -> dict[str, Any]:
+    """``start_value``: the capital before the first trade (on the first day), so the first
+    purchase's fees count in the drawdown, the annual return and the first windows."""
     days = list(values.index)
     span_years = (days[-1] - days[0]).days / 365.25
     wealth = values.to_numpy(dtype=float)
+    if start_value is not None:
+        days, wealth = [days[0], *days], np.concatenate([[start_value], wealth])
     drawdown = float((wealth / np.maximum.accumulate(wealth) - 1.0).min())
     cagr = float((wealth[-1] / wealth[0]) ** (1 / span_years) - 1) if span_years > 0 else None
     returns = np.diff(wealth) / wealth[:-1]
@@ -149,7 +162,7 @@ def measures(
         stop = add_months(begin, 12 * rolling_years)
         if stop > days[-1]:
             break
-        first = max(bisect_right(days, begin) - 1, 0)
+        first = 0 if begin == days[0] else bisect_right(days, begin) - 1
         last = bisect_right(days, stop) - 1
         outcomes.append(wealth[last] / wealth[first] - 1 > 0)
     return {
@@ -232,37 +245,54 @@ def run(
                 industries[code] = f"未知產業 {code}"
         return industries[code]
 
-    scored = rows.loc[(rows["status"] == "OK") & rows[score_column].notna()]
+    # NO_SCORE is the default preference's status; another preference may still score.
+    scored = rows.loc[rows["status"].isin(["OK", "NO_SCORE"]) & rows[score_column].notna()]
     scored = scored.assign(score=scored[score_column])
     picks = {
         d: select(scored.loc[scored["base_date"] == d], industry, s) for d in rebalance_dates(s)
     }
+    short = {d.isoformat(): len(c) for d, c in picks.items() if len(c) < s.holdings}
+    if short:
+        raise MissingDataError(
+            None, f"strategy.{score_column}", short, f"{s.holdings} candidates at each rebalance"
+        )
+    # Each pick's prices only up to the day it is sold: its rows passed the data checks
+    # through base + horizon, not necessarily through the end.
+    dates = list(picks)
+    held_until: dict[str, date] = {}
+    for i, day in enumerate(dates):
+        sold = dates[i + 1] + timedelta(days=_SALE_DAYS) if i + 1 < len(dates) else s.end
+        for code in picks[day]:
+            held_until[code] = max(held_until.get(code, sold), sold)
     prices: dict[str, pd.Series] = {}
-    for code in sorted({c for codes in picks.values() for c in codes}):
-        last = min(s.end, delisted[code] - timedelta(days=1)) if code in delisted else s.end
+    for code, until in sorted(held_until.items()):
+        last = min(until, s.end)
+        if code in delisted:
+            last = min(last, delisted[code] - timedelta(days=1))
         adjusted = market_data.prices(market_data.resolve(code), last).adjusted
         prices[code] = adjusted.set_index("date")["adj_close"].dropna().astype(float)
     etf_prices = market_data.etf_prices(config.markets.tw.benchmark.compare_etf, s.end)
     etf = etf_prices.adjusted.set_index("date")["adj_close"].dropna().astype(float)
     rates = market_data.risk_free_rates()
-    periods = {
-        "in_sample": (s.first_rebalance, s.out_of_sample_start, s.rolling_years_full),
+    periods = {  # the shorter periods cannot fit rolling_years_full windows
+        "in_sample": (s.first_rebalance, s.out_of_sample_start, s.rolling_years_out_of_sample),
         "out_of_sample": (s.out_of_sample_start, s.end, s.rolling_years_out_of_sample),
         "full": (s.first_rebalance, s.end, s.rolling_years_full),
     }
     result: dict[str, Any] = {}
     for name, (start, end, years) in periods.items():
-        start_close = max(d for d in etf.index if d <= start)  # trades at the base close
-        days = [d for d in etf.index if start_close <= d <= end]
-        chosen = {  # each rebalance at the last trading day on or before its base date
-            days[bisect_right(days, d) - 1]: codes for d, codes in picks.items() if start <= d < end
+        first_trade = min(d for d in etf.index if d > start)  # the day after the base date
+        days = [d for d in etf.index if first_trade <= d <= end]
+        chosen = {  # each rebalance on the first trading day after its base date
+            days[bisect_right(days, d)]: codes for d, codes in picks.items() if start <= d < end
         }
         strategy = simulate(chosen, prices, days, capital, costs)
         held = buy_and_hold(etf, days, capital, costs)
         rf, _ = rates.average(days[0], days[-1])
+        annual = config.risk.annualization_days
         result[name] = {
-            "strategy": measures(strategy, rf, years, config.risk.annualization_days),
-            "etf": measures(held, rf, years, config.risk.annualization_days),
+            "strategy": measures(strategy, rf, years, annual, start_value=capital),
+            "etf": measures(held, rf, years, annual, start_value=capital),
             "rebalances": len(chosen),
             "risk_free": rf,
         }

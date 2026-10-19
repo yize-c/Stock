@@ -8,11 +8,12 @@
 2. ``liquidity``: each month-end base date, the 60-trading-day average traded value of every
    stock listed then (after its listing; FinMind's emerging-board days are not counted); the
    most traded ``liquidity_keep_share`` are kept.
-3. ``score`` (one shard of the kept stocks): the data checks once per stock (no Yahoo
-   comparison), then for each kept base date the point-in-time base score of every investor
-   preference (成長 × 風險) and the next ``horizon_months`` gross return on adjusted
-   prices. A stock delisted inside the horizon is valued at its last close (what a holder
-   last could sell at).
+3. ``score`` (one shard of the kept stocks): the data checks (no Yahoo comparison) as of
+   the end of each base date's window (``data_check_scope``), then for each kept base date
+   that passed the point-in-time base score of every investor preference (成長 × 風險), the
+   next ``horizon_months`` gross return on adjusted prices and the 條件符合度 outcomes. A
+   stock delisted inside the horizon is valued at its last close (what a holder last could
+   sell at).
 4. ``summary`` (see ``summary.py``).
 
 Every row the stages write is a derived value (scores, returns, liquidity), never a raw
@@ -225,11 +226,10 @@ def forward_gross(
     return stop[1] / start[1] - 1.0, inside_delisting
 
 
-def forward_drawdown(
-    adjusted: pd.Series, base: date, months: int, delisted: date | None
-) -> float | None:
+def forward_drawdown(adjusted: pd.Series, base: date, months: int) -> float | None:
     """Maximum drawdown (≤ 0) of the adjusted closes from ``base`` to ``base + months``
-    (validation a); a stock delisted inside the horizon counts until its last close."""
+    (validation a); a stock delisted or halted inside the horizon counts until its last
+    close."""
     end = add_months(base, months)
     start = _close_on_or_before(adjusted, base)
     if start is None or (base - start[0]).days > _MAX_STALE_DAYS:
@@ -237,9 +237,8 @@ def forward_drawdown(
     window = adjusted.loc[[start[0] <= d <= end for d in adjusted.index]]
     if len(window) < 2:
         return None
-    inside_delisting = delisted is not None and delisted <= end
-    if not inside_delisting and (end - window.index[-1]).days > _MAX_STALE_DAYS:
-        return None  # no close near the horizon end (a long halt): no outcome
+    # A long halt counts up to the last close before it (a lower bound on the fall): dropping
+    # it would drop the stocks most likely in trouble.
     values = window.to_numpy(dtype=float)
     return float((values / np.maximum.accumulate(values) - 1.0).min())
 
@@ -256,12 +255,15 @@ def _latest_ttm_eps(ttm: pd.DataFrame, day: date) -> tuple[date, float] | None:
 
 def forward_eps_growth(ttm: pd.DataFrame, base: date, months: int, last: date) -> float | None:
     """Growth of the TTM EPS known ``months`` after ``base`` over the TTM EPS known at
-    ``base`` (validation b; one share basis); none when the earlier EPS is not positive."""
+    ``base`` (validation b; one share basis); none when the earlier EPS is not positive or
+    the two are not exactly ``months`` apart (a late filing)."""
     end = add_months(base, months)
     if end > last or ttm.empty:
         return None
     before, after = _latest_ttm_eps(ttm, base), _latest_ttm_eps(ttm, end)
-    if before is None or after is None or after[0] <= before[0] or before[1] <= 0:
+    if before is None or after is None or before[1] <= 0:
+        return None
+    if pd.Timestamp(after[0]).date() != add_months(pd.Timestamp(before[0]).date(), months):
         return None
     return after[1] / before[1] - 1.0
 
@@ -325,25 +327,32 @@ def score_shard(
         last_day = settings.data_as_of
         if code in delisted:
             last_day = min(last_day, delisted[code] - timedelta(days=1))
-        problem = _health_problem(market_data, code, last_day)
-        if problem is not None:
-            rows += [
-                {"code": code, "base_date": d, "status": "DATA_CHECK_FAILED", "reason": problem}
-                for d in dates
-            ]
+        problems, through = data_check_scope(
+            market_data, code, dates, settings.horizon_months, last_day
+        )
+        rows += [
+            {"code": code, "base_date": d, "status": "DATA_CHECK_FAILED", "reason": problems[d]}
+            for d in dates
+            if problems[d] is not None
+        ]
+        if through is None:
             continue
         ticker = market_data.resolve(code)
-        later = market_data.prices(ticker, last_day)
+        later = market_data.prices(ticker, through)  # data beyond ``through`` failed a check
         adjusted = later.adjusted.set_index("date")["adj_close"].dropna().astype(float)
         raw = later.raw.set_index("date")["close"].dropna().astype(float)
+        outcome_problem = None
         try:  # the statements as finally published, for the forward growth outcomes
-            final = load_stock_data(market_data, code, last_day, with_peers=False)
-            final_ttm = ttm_table(final.quarterly, final.basis, last_day)
+            final = load_stock_data(market_data, code, through, with_peers=False)
+            final_ttm = ttm_table(final.quarterly, final.basis, through)
             final_revenue = final.revenue
-        except (DataValidationError, ValueError, KeyError):
+        except (DataValidationError, ValueError, KeyError) as exc:
             final_ttm, final_revenue = pd.DataFrame(), pd.DataFrame()
+            outcome_problem = f"{type(exc).__name__}: {exc}"
         progress(f"{code} ({n + 1}/{len(codes)}): {len(dates)} base dates")
         for base in dates:
+            if problems[base] is not None:
+                continue
             row: dict[str, Any] = {"code": code, "base_date": base}
             try:
                 data = load_stock_data(market_data, code, base, with_peers=False)
@@ -367,11 +376,10 @@ def score_shard(
                 "growth_score": growth_risk.growth.score,
                 "risk_score": growth_risk.risk.score,
                 "gross": gross,
-                "mdd_fwd": forward_drawdown(adjusted, base, horizon, delisted.get(code)),
-                "eps_growth_fwd": forward_eps_growth(final_ttm, base, horizon, last_day),
-                "revenue_growth_fwd": forward_revenue_growth(
-                    final_revenue, base, horizon, last_day
-                ),
+                "mdd_fwd": forward_drawdown(adjusted, base, horizon),
+                "eps_growth_fwd": forward_eps_growth(final_ttm, base, horizon, through),
+                "revenue_growth_fwd": forward_revenue_growth(final_revenue, base, horizon, through),
+                "outcome_problem": outcome_problem,
                 "delisted_in_horizon": delisted_inside,
                 **{
                     f"net_{t.capital}": tier_net(gross, price, t.capital, t.holdings, False, config)
@@ -383,9 +391,33 @@ def score_shard(
         "code", "base_date", "status", "reason", "score",
         *[f"score_{k}" for k in preferences.options],
         *[f"part_{k}" for k in PART_KEYS], "growth_score", "risk_score",
-        "gross", *OUTCOME_COLUMNS, "delisted_in_horizon", *[f"net_{t.capital}" for t in tiers],
+        "gross", *OUTCOME_COLUMNS, "outcome_problem", "delisted_in_horizon",
+        *[f"net_{t.capital}" for t in tiers],
     ]  # fmt: skip
     return pd.DataFrame(rows).reindex(columns=columns)
+
+
+def data_check_scope(
+    market_data: MarketData, code: str, dates: list[date], horizon_months: int, last_day: date
+) -> tuple[dict[date, str | None], date | None]:
+    """Each base date's data-check problem (None: passed) and the latest checked day that
+    passed (None: none did).
+
+    A row uses data up to ``base + horizon_months`` (its score up to the base date, its
+    outcomes after it), so its checks run as of that day, at most ``last_day``. One run at
+    ``last_day`` settles a stock whose data all pass; otherwise each distinct day is checked
+    on its own, so a failure only excludes the base dates whose window reaches it (a check at
+    ``last_day`` alone would select stocks on later information).
+    """
+    problem = _health_problem(market_data, code, last_day)
+    if problem is None:
+        return dict.fromkeys(dates), last_day
+    reach = {d: min(add_months(d, horizon_months), last_day) for d in dates}
+    checked: dict[date, str | None] = {last_day: problem}
+    for day in sorted(set(reach.values()) - {last_day}):
+        checked[day] = _health_problem(market_data, code, day)
+    passed = [day for day, p in checked.items() if p is None]
+    return {d: checked[reach[d]] for d in dates}, max(passed) if passed else None
 
 
 def _health_problem(market_data: MarketData, code: str, as_of: date) -> str | None:

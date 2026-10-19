@@ -11,6 +11,7 @@ import pytest
 
 from stock_research.calibration import backtest
 from stock_research.config import load_config
+from stock_research.data.errors import MissingDataError
 from stock_research.data.risk_free import RiskFreeRates
 from tests.conftest import DEFAULT_CONFIG
 
@@ -146,3 +147,63 @@ def test_run_compares_the_top_scores_with_0050_in_and_out_of_sample() -> None:
     assert result["passed"] == all(t["passed"] for t in result["criteria"].values())
     assert result["overfit"]["measure"].startswith("策略年化報酬")
     assert "產業分類用目前的產業別" in " ".join(result["limitations"])
+
+
+def _config(**strategy):
+    return CONFIG.model_copy(
+        update={
+            "calibration": CONFIG.calibration.model_copy(
+                update={"strategy": STRATEGY.model_copy(update=strategy)}
+            )
+        }
+    )
+
+
+def _rows(scores=(("1111", 90.0), ("2222", 50.0), ("3333", 10.0)), skip=()) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {"code": code, "base_date": d, "status": "OK", "score_conservative": score}
+            for d in backtest.rebalance_dates(STRATEGY)
+            if d not in skip
+            for code, score in scores
+        ]
+    )
+
+
+def test_too_few_candidates_is_an_error_not_cash() -> None:
+    """A rebalance without enough scored stocks must not quietly sit in cash."""
+    missing = backtest.rebalance_dates(STRATEGY)[5]
+    with pytest.raises(MissingDataError, match=missing.isoformat()):
+        backtest.run(_rows(skip={missing}), "score_conservative", _Market(), _config(holdings=1),
+                     delisted={})  # fmt: skip
+    with pytest.raises(MissingDataError, match="10 candidates"):
+        backtest.run(_rows(), "score_conservative", _Market(), CONFIG, delisted={})
+
+
+def test_trades_on_the_day_after_the_base_date_and_counts_the_first_fees() -> None:
+    result = backtest.run(_rows(), "score_conservative", _Market(), _config(holdings=1), {})
+    periods = result["periods"]
+    # 2023-12-31 is a Sunday: the out-of-sample period trades from Monday 2024-01-01 on.
+    assert periods["out_of_sample"]["strategy"]["start"] == "2024-01-01"
+    assert periods["full"]["strategy"]["start"] == "2021-07-01"  # the day after 2021-06-30
+    # The shorter periods use the short rolling window, so they have a positive share.
+    assert periods["in_sample"]["strategy"]["rolling_years"] == 1
+    assert periods["in_sample"]["strategy"]["positive_share"] is not None
+    flat = pd.Series(100.0, index=_days("2024-01-01", "2024-12-31"))
+    plain = backtest.measures(flat * 0.999, 0.01, 1, 252)
+    with_capital = backtest.measures(flat * 0.999, 0.01, 1, 252, start_value=100.0)
+    assert plain["max_drawdown"] == 0.0 and with_capital["max_drawdown"] == pytest.approx(-0.001)
+    assert with_capital["cagr"] < plain["cagr"] == 0.0
+
+
+def test_a_delisted_pick_keeps_its_last_close_until_the_next_rebalance() -> None:
+    market = _Market()
+    gone = date(2022, 3, 15)
+    market.closes["1111"] = market.closes["1111"].loc[
+        [d < gone for d in market.closes["1111"].index]
+    ]
+    rows = _rows()
+    later = np.array([d >= gone for d in rows["base_date"]])
+    rows.loc[later & (rows["code"] == "1111"), "score_conservative"] = np.nan  # no longer scored
+    result = backtest.run(rows, "score_conservative", market, _config(holdings=1), {"1111": gone})
+    assert result["periods"]["full"]["rebalances"] == 21

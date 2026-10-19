@@ -203,6 +203,14 @@ def summarize(
             "未做 FinMind 與 Yahoo 的收盤價交叉比對（Yahoo 沒有已下市股票）；其餘資料檢查照常。",
             "B 項採用哪些指標，依 walk-forward 開發期（2023-12～2025-06）決定，與樣本外期間重疊。",
             "在持有期間內下市的股票以最後收盤價計算，未計入清算或其他回收金額。",
+            "資料檢查以每個基準日之後 12 個月為止的資料進行；"
+            "檢查未通過只排除持有期涵蓋問題日期的基準日。",
+            "回撤（驗證 a）：期間內停牌或下市的股票算到最後一個收盤價，可能低估跌幅。",
+            "EPS、營收成長（驗證 b）：期間內下市、基期 EPS ≤ 0、財報晚於法定期限或月營收缺月的"
+            "股票無法計算而不納入（各驗證列出不納入的筆數）；營收的「之後 12 個月」含基準月後"
+            "第 12 個月，公告日晚於基準日加 12 個月約 10 天。",
+            "信賴區間以年度為區塊重抽（12 個月持有期互相重疊）；樣本外只有 2024、2025 兩個"
+            "年度，區間很粗略，只供參考，不影響判定。",
             "流動性篩選依當月前 60 個交易日的平均成交金額，只保留前半。",
         ],
         "disclaimer": DISCLAIMER,
@@ -223,14 +231,17 @@ def _calibrate(rows: pd.DataFrame, bench: pd.DataFrame, config: AppConfig) -> di
     settings = config.calibration
     score_settings = config.research_score
     rng = np.random.default_rng(settings.seed)
-    scored = rows.loc[(rows["status"] == "OK") & rows["score"].notna()].copy()
+    # NO_SCORE is the default preference's status; another preference may still score.
+    usable = rows["status"].isin(["OK", "NO_SCORE"]) & rows["score"].notna()
+    scored = rows.loc[usable].copy()
     scored = assign_groups(scored, settings.groups).merge(bench, on="base_date", how="left")
     scored["period"] = np.where(
         [d >= settings.out_of_sample_start for d in scored["base_date"]],
         "out_of_sample",
         "in_sample",
     )
-    scored["block"] = [f"{d.year}Q{(d.month - 1) // 3 + 1}" for d in scored["base_date"]]
+    # 12-month outcomes of base dates up to a year apart overlap: resample whole years.
+    scored["block"] = [str(d.year) for d in scored["base_date"]]
     tiers = score_settings.capital_tiers
     for tier in tiers:  # the stocks' net returns come from the shards
         scored[f"etf_{tier.capital}"] = [
@@ -340,6 +351,7 @@ def _validation(
         "measure": "median",
         "min_rank_correlation": settings.validation_min_rank_correlation,
         "table": table,
+        "without_outcome": _without_outcome(scored, column),
     }
     medians = [e["out_of_sample"]["median"] for e in table]
     if any(m is None for m in medians) or len(medians) < 2:
@@ -359,6 +371,18 @@ def _validation(
         "rank_correlation": rho,
         "top_median": medians[-1],
         "bottom_median": medians[0],
+    }
+
+
+def _without_outcome(scored: pd.DataFrame, column: str) -> dict[str, int]:
+    """Out-of-sample scored rows left out for lack of ``column``, and how many of them were
+    delisted inside the horizon (a survivorship check on validation b)."""
+    oos = scored.loc[scored["period"] == "out_of_sample"]
+    missing = oos.loc[~np.isfinite(oos[column].to_numpy(dtype=float))]
+    return {
+        "rows": int(len(missing)),
+        "of_scored": int(len(oos)),
+        "delisted_in_horizon": int(missing["delisted_in_horizon"].fillna(False).sum()),
     }
 
 

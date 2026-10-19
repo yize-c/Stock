@@ -214,6 +214,7 @@ def _calibration(passed: bool) -> dict:
             "rank_correlation": 0.8 if passed else 0.1, "min_rank_correlation": 0.5,
             "top_median": -0.12, "bottom_median": -0.25,
             "reason": None if passed else "分數組與之後 12 個月的最大回撤的等級相關 0.10，低於 0.5",
+            "without_outcome": {"rows": 7, "of_scored": 900, "delisted_in_horizon": 2},
         },
         "returns": {
             "label": "之後 12 個月的報酬（扣交易成本，平均）", "gating": False,
@@ -270,6 +271,9 @@ def test_export_attaches_the_research_score(raw_config, write_config, tmp_path) 
     assert not research["validated"] and research["validation_note"] == "未通過任何驗證，僅供參考"
     assert research["aim"] == "追求比 0050 抗跌"
     drawdown = next(v for v in research["validations"] if v["key"] == "drawdown")
+    assert (
+        "樣本外 900 筆中有 7 筆無法計算結果而不納入（其中 2 筆在期間內下市）" in drawdown["lines"]
+    )
     assert not drawdown["passed"] and any("未通過原因" in line for line in drawdown["lines"])
 
     passed = _calibration(True) | {"overfit": {"warning": True, "message": "可能過度擬合"}}
