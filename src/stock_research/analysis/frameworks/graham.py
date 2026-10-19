@@ -4,6 +4,7 @@ every year."""
 from __future__ import annotations
 
 from stock_research.analysis.frameworks.base import (
+    NEGATIVE_EPS,
     FrameworkInputs,
     FrameworkResult,
     Outcome,
@@ -29,7 +30,7 @@ def _pe_times_pb(inputs: FrameworkInputs):
     if v is None:
         return insufficient(key, name, inputs.valuation_problem or "no valuation")
     if v.eps_ttm <= 0:
-        return not_applicable(key, name, f"TTM EPS {v.eps_ttm:.2f} <= 0")
+        return not_applicable(key, name, NEGATIVE_EPS)
     if not v.book_value_per_share > 0:
         return not_applicable(key, name, "book value <= 0", warning="股東權益 ≤ 0，淨值比無意義")
     product = v.pe * v.pb
@@ -40,7 +41,7 @@ def _pe_times_pb(inputs: FrameworkInputs):
         Outcome.PASS if product < maximum else Outcome.FAIL,
         product,
         f"P/E x P/B < {maximum:g}",
-        f"P/E {v.pe:.2f} x P/B {v.pb:.2f} on {v.on}",
+        f"本益比 {v.pe:.2f} × 淨值比 {v.pb:.2f}（{v.on}）",
     )
 
 

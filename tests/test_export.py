@@ -43,6 +43,10 @@ def test_export_writes_index_and_detail(config, tmp_path) -> None:
     detail = _read(tmp_path / "site" / "data" / "stocks" / "2330.json")
     # FinMind's terms: no raw data on the public site, and attribution on every page.
     assert "close" not in detail and "close" not in row
+    text = (tmp_path / "site" / "data" / "stocks" / "2330.json").read_text(encoding="utf-8")
+    latest = float(md.raw_daily(md.resolve("2330"))["close"].iloc[-1])
+    assert str(latest) not in text and "現價 " not in text  # not even inside item details
+    assert "TTM EPS" not in text
     assert any("FinMind" in line for line in detail["disclaimer"])
     assert any("FinMind" in line for line in index["disclaimer"])
     assert detail["report_markdown"].startswith("# 2330")

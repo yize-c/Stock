@@ -145,6 +145,11 @@ def info(key: str, name: str, value: float | str | None, detail: str = "") -> It
     return ItemResult(key, name, ItemKind.INFO, Outcome.INFO, value, "", detail)
 
 
+# Valuation items with TTM EPS <= 0: P/E is meaningless. The EPS itself stays out of the text
+# (item details reach the public site; FinMind's terms forbid republishing raw figures).
+NEGATIVE_EPS = "近四季 EPS ≤ 0，本益比無意義"
+
+
 def insufficient(key: str, name: str, reason: str) -> ItemResult:
     return scored(key, name, Outcome.INSUFFICIENT, detail=reason)
 

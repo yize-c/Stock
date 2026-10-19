@@ -11,6 +11,7 @@ from __future__ import annotations
 import numpy as np
 
 from stock_research.analysis.frameworks.base import (
+    NEGATIVE_EPS,
     FrameworkInputs,
     FrameworkResult,
     Outcome,
@@ -112,12 +113,10 @@ def _pe(inputs: FrameworkInputs):
     if v is None:
         return insufficient(key, name, inputs.valuation_problem or "no valuation")
     if v.eps_ttm <= 0:
-        return not_applicable(key, name, f"TTM EPS {v.eps_ttm:.2f} <= 0")
+        return not_applicable(key, name, NEGATIVE_EPS)
     maximum = inputs.config.frameworks.guyu.pe_max
     outcome = Outcome.PASS if v.pe < maximum else Outcome.FAIL
-    return scored(
-        key, name, outcome, v.pe, f"P/E < {maximum:g}", f"{v.price} / {v.eps_ttm:.2f} on {v.on}"
-    )
+    return scored(key, name, outcome, v.pe, f"P/E < {maximum:g}", f"本益比 {v.pe:.2f}（{v.on}）")
 
 
 def _yield(inputs: FrameworkInputs):
@@ -133,7 +132,7 @@ def _yield(inputs: FrameworkInputs):
         outcome,
         v.dividend_yield,
         f"yield > {minimum:.0%}",
-        f"cash dividends over the 12 months to {v.on}",
+        f"截至 {v.on} 的 12 個月現金股利",
     )
 
 
@@ -149,10 +148,12 @@ def _reference_price(inputs: FrameworkInputs):
         return info(key, name, None, "每股淨值或 ROE 資料不足")
     target = expected[groups[0]]
     price = v.book_value_per_share * roe.for_scoring / target
+    # Prices themselves stay out of the text (FinMind's terms: no raw data on the public site).
+    side = "低於" if v.price < price else "不低於"
     return info(
         key,
         name,
         price,
-        f"{v.book_value_per_share:.2f} × {roe.for_scoring:.2%} ÷ {target:.0%}（{groups[0]}）；"
-        f"現價 {v.price}。僅描述是否符合此投資人的估值標準，不構成買賣建議。",
+        f"每股淨值 × ROE {roe.for_scoring:.2%} ÷ 產業期待 ROE {target:.0%}（{groups[0]}）；"
+        f"現價{side}參考價。僅描述是否符合此投資人的估值標準，不構成買賣建議。",
     )
