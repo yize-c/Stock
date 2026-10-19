@@ -597,12 +597,17 @@ class MarketData:
         if calendar is None or ticker is None:
             return report
         if ticker.market is Market.TPEX and self._tpex is not None:
-            _attempt(report, "listing.official_tpex", lambda: self._check_tpex_listing(ticker))
+            note = _attempt(
+                report, "listing.official_tpex", lambda: self._check_tpex_listing(ticker)
+            )
+            if note:
+                report.limitations.append(note)
         prices = _attempt(report, "prices.fetch_and_adjust", lambda: self.prices(ticker, as_of))
         if prices is not None:
-            for change in self._memo.uncovered.get(ticker.code, []):
-                report.limitations.append(change.describe(ticker.code))
             breaks = self._memo.limit_breaks.get(ticker.code)
+            for change in self._memo.uncovered.get(ticker.code, []):
+                if breaks is None or change.resumed >= breaks.last:  # one start date only
+                    report.limitations.append(change.describe(ticker.code))
             if breaks is not None:
                 report.limitations.append(breaks.describe(ticker.code))
             self._price_checks(report, ticker, prices, calendar, as_of, now, cross_source)
@@ -654,13 +659,18 @@ class MarketData:
             )
         return report
 
-    def _check_tpex_listing(self, ticker: Ticker) -> None:
-        """The derived listing date must match TPEx's official one."""
+    def _check_tpex_listing(self, ticker: Ticker) -> str | None:
+        """The listing date in use must match TPEx's official one; returns a note when there
+        is nothing to compare (a delisted stock)."""
         assert self._tpex is not None
         companies = self._tpex.listed_companies()
         row = companies.loc[companies["code"] == ticker.code]
         if row.empty and ticker.code in self.delisting_dates():
-            return  # TPEx lists current companies only: nothing to compare a delisted one with
+            # TPEx lists current companies only: nothing to compare a delisted one with.
+            return (
+                f"{ticker.code}：已下櫃，櫃買中心不再列出，上櫃日無法與官方比對，"
+                "面額用預設值（由股數交叉驗證把關）。"
+            )
         if row.empty:
             raise MissingDataError(ticker.code, "tpex:listed_companies", "absent", "a TPEx listing")
         official = row["listing_date"].iloc[0]
@@ -677,6 +687,7 @@ class MarketData:
                 f"derived {derived or 'before the emerging board'}, TPEx {official}",
                 "the official TPEx listing date (add a listing override if TPEx is right)",
             )
+        return None
 
     def _price_checks(
         self,
@@ -690,7 +701,7 @@ class MarketData:
     ) -> None:
         code = ticker.code
         raw = prices.raw
-        latest = max(raw["date"])
+        latest = max(raw.loc[raw["close"].notna(), "date"])  # a day without a price is stale
         report.add_source(SourceStatus("finmind:TaiwanStockPrice", now, latest))
         halts = [
             KnownSuspension(ticker=code, start=start, end=end, reason=f"{kind} share re-issue")
@@ -700,7 +711,12 @@ class MarketData:
             report,
             "prices.completeness",
             lambda: check_price_completeness(
-                code, raw, calendar, [*self._tw.known_suspensions, *halts]
+                code,
+                raw,
+                calendar,
+                [*self._tw.known_suspensions, *halts],
+                unpriced_max_run_days=self._tw.data_validation.unpriced_max_run_days,
+                unpriced_max_volume_share=self._tw.data_validation.unpriced_max_volume_share,
             ),
         )
         traded = raw.loc[raw["close"].notna()]

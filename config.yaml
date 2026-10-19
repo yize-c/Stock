@@ -245,6 +245,12 @@ markets:
       # days followed by a close beyond the price limit (and no ex-rights event) is treated
       # as an uncovered capital change: prices start on the resumption day.
       min_halt_trading_days: 3
+      # A traded day with volume but no price counts as a day without a close (user decision
+      # 2026-10-19; in the full-market probe 80% of such runs were one day and the volume
+      # was 0.2% of the stock's median traded day, p90 1.8%). Longer runs, or more volume
+      # than this share of the median traded day, look like a source outage and fail.
+      unpriced_max_run_days: 10
+      unpriced_max_volume_share: 0.20
       # Raw-close cross-check between official, FinMind and yfinance.
       cross_source_tolerance: 0.005
       # Yahoo closes found wrong against the official daily data (TWSE STOCK_DAY, TPEx

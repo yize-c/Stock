@@ -369,3 +369,32 @@ def test_suspension_of_other_ticker_or_outside_range_still_raises() -> None:
     )
     with pytest.raises(MissingDataError):
         check_price_completeness("2330", prices(days=days), CAL, [other])
+
+
+def test_long_or_heavy_runs_of_unpriced_days_fail() -> None:
+    """Days with volume but no price only count as days without a close in short runs at a
+    sliver of the usual volume; otherwise they look like a source outage."""
+    df = prices()
+    df["open"] = df["close"]
+    df.loc[[4, 5, 6], ["open", "close"]] = float("nan")
+    df.loc[[4, 5, 6], "volume"] = 1
+    with pytest.raises(MissingDataError, match="3 consecutive days"):
+        check_price_completeness("2330", df, CAL, unpriced_max_run_days=2)
+    issues = check_price_completeness(
+        "2330", df, CAL, unpriced_max_run_days=3, unpriced_max_volume_share=0.2
+    )
+    assert [i.check for i in issues] == ["unpriced"]
+    df.loc[5, "volume"] = 1000  # as much as a priced day
+    with pytest.raises(AnomalyError, match="of the median priced day"):
+        check_price_completeness("2330", df, CAL, unpriced_max_volume_share=0.2)
+
+
+def test_missing_revenue_months_are_listed() -> None:
+    months = pd.period_range("2019-01", "2020-12", freq="M").delete(5)
+    revenue = pd.DataFrame(
+        {"period_end": [m.end_time.date() for m in months], "revenue": [100.0] * len(months)}
+    )
+    issues = check_monthly_revenue("2330", revenue, 5.0)
+    gaps = [i for i in issues if i.check == "revenue_gap"]
+    assert len(gaps) == 1 and gaps[0].severity is IssueSeverity.WARNING
+    assert gaps[0].dates == (date(2019, 6, 30),) and "2019-06" in gaps[0].detail

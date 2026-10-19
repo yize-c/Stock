@@ -146,7 +146,9 @@ def outcomes(
             available = pd.to_datetime(rows["available_date"])
             rows = rows.loc[(available > pd.Timestamp(base)) & (available <= pd.Timestamp(end))]
             values = rows["yoy"].dropna()
-            if values.empty:
+            if "gap" in rows and rows["gap"].any():
+                done(key, reference(key), None, None, "a revenue month missing in the horizon")
+            elif values.empty:
                 done(key, reference(key), None, None, "no YoY month announced in the horizon")
             else:
                 when = max(rows["available_date"])

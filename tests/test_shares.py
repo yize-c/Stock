@@ -269,3 +269,24 @@ def test_share_counts_without_a_parent_line_use_net_income_less_nci() -> None:
     with_nci = [*rows, line("income", "NoncontrollingInterests", 20.0)]
     implied, _ = share_counts(pd.DataFrame(with_nci), basis)
     assert implied[end] == 90.0
+
+
+def test_a_quarter_missing_a_reported_nci_line_gets_no_parent_income() -> None:
+    """A company that reports an NCI line in some quarter: a quarter without it (and without
+    a parent line) is not assumed to have no non-controlling interests."""
+    q1, q2 = date(2019, 3, 31), date(2019, 6, 30)
+
+    def line(statement, item, end, value):
+        return {"statement": statement, "item": item, "period_end": end, "value": value}
+
+    basis = share_basis(
+        "x", pd.DataFrame(), pd.DataFrame(), start=START, initial_par=10.0, tolerance=0
+    )
+    rows = [
+        line("income", "EPS", q1, 2.0), line("income", "EPS", q2, 2.0),
+        line("income", "IncomeAfterTaxes", q1, 200.0),
+        line("income", "IncomeAfterTaxes", q2, 200.0),
+        line("income", "NoncontrollingInterests", q1, 20.0),
+    ]  # fmt: skip
+    implied, _ = share_counts(pd.DataFrame(rows), basis)
+    assert implied[q1] == 90.0 and pd.isna(implied[q2])

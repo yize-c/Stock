@@ -110,6 +110,9 @@ def check_price_completeness(
     prices: pd.DataFrame,
     calendar: TradingCalendar,
     known_suspensions: Iterable[KnownSuspension] = (),
+    *,
+    unpriced_max_run_days: int | None = None,
+    unpriced_max_volume_share: float | None = None,
 ) -> list[ValidationIssue]:
     """Nulls, negatives, zero prices, duplicate days, gaps; returns notices.
 
@@ -118,7 +121,9 @@ def check_price_completeness(
     some older days) is a warning, not a failure: every analysis uses closes and volume only.
     A day with volume but no price at all (FinMind; typically a sliver of the usual volume,
     such as odd lots only) is a warning too and counts as a day without a close (user
-    decision 2026-10-19): nothing is filled in.
+    decision 2026-10-19): nothing is filled in. A run longer than ``unpriced_max_run_days``
+    or volume above ``unpriced_max_volume_share`` of the median priced day looks like a
+    source outage and raises.
     """
     if prices.empty:
         raise MissingDataError(ticker, "prices", "empty", "at least one row")
@@ -192,7 +197,11 @@ def check_price_completeness(
             )
         )
     if volume is not None:
-        unpriced = dates[no_price & (volume > 0)]
+        unpriced_mask = no_price & (volume > 0)
+        unpriced = dates[unpriced_mask]
+        _check_unpriced(
+            ticker, dates, unpriced_mask, volume, unpriced_max_run_days, unpriced_max_volume_share
+        )
         if not unpriced.empty:
             issues.append(
                 ValidationIssue(
@@ -218,6 +227,45 @@ def check_price_completeness(
                 )
             )
     return issues
+
+
+def _check_unpriced(
+    ticker: str,
+    dates: pd.Series,
+    unpriced: pd.Series,
+    volume: pd.Series,
+    max_run: int | None,
+    max_share: float | None,
+) -> None:
+    """Raise when days with volume but no price come in long runs or with real volume."""
+    if not unpriced.any():
+        return
+    order = dates.sort_values().index
+    flags, run, longest, start, worst = unpriced.loc[order].to_numpy(), 0, 0, None, None
+    for position, flag in enumerate(flags):
+        run = run + 1 if flag else 0
+        if run == 1:
+            start = dates.loc[order[position]]
+        if run > longest:
+            longest, worst = run, start
+    if max_run is not None and longest > max_run:
+        raise MissingDataError(
+            ticker,
+            "close",
+            f"{longest} consecutive days with volume but no price from {worst}",
+            f"at most {max_run} (longer looks like a source outage)",
+        )
+    priced = volume.loc[~unpriced & (volume > 0)]
+    if max_share is not None and len(priced):
+        share = volume.loc[unpriced] / float(priced.median())
+        if (share > max_share).any():
+            day = dates.loc[share.idxmax()]
+            raise AnomalyError(
+                ticker,
+                "close",
+                f"{day}: volume {share.max():.0%} of the median priced day but no price",
+                f"at most {max_share:.0%} on a day without a price",
+            )
 
 
 # --- price limits -------------------------------------------------------------------------
@@ -384,7 +432,8 @@ def check_balance_sheet(
 def check_monthly_revenue(
     ticker: str, revenue: pd.DataFrame, yoy_abs_max: float
 ) -> list[ValidationIssue]:
-    """Flag zero revenue and |YoY| above ``yoy_abs_max`` for manual confirmation.
+    """Flag zero revenue and |YoY| above ``yoy_abs_max`` for manual confirmation, and list
+    months the source does not report (a warning: windows covering one have no revenue YoY).
 
     ``revenue`` has ``period_end`` (month end) and ``revenue`` columns, one row per month.
     """
@@ -395,6 +444,20 @@ def check_monthly_revenue(
     by_month = frame.set_index("_m")["revenue"].astype(float)
 
     issues: list[ValidationIssue] = []
+    if len(by_month):
+        expected = pd.period_range(by_month.index.min(), by_month.index.max(), freq="M")
+        missing = [m for m in expected if m not in by_month.index]
+        if missing:
+            issues.append(
+                ValidationIssue(
+                    ticker,
+                    "revenue_gap",
+                    IssueSeverity.WARNING,
+                    f"{len(missing)} month(s) without revenue (from {missing[0]}); the windows "
+                    "covering them have no revenue YoY",
+                    tuple(m.end_time.date() for m in missing),
+                )
+            )
     for month, value in by_month.items():
         if value == 0:
             issues.append(

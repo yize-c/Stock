@@ -280,6 +280,11 @@ class DataValidationConfig(_Model):
     cross_source_lookback_trading_days: PositiveInt
     balance_sheet_tolerance: Fraction
     revenue_yoy_abs_max: PositiveFloat
+    # Traded days with volume but no price count as days without a close (user decision
+    # 2026-10-19), but only in short runs at a sliver of the usual volume; beyond these
+    # limits they look like a source outage and fail.
+    unpriced_max_run_days: PositiveInt
+    unpriced_max_volume_share: Fraction
 
 
 class TwMarketConfig(_Model):

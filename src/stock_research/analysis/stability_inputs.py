@@ -107,7 +107,9 @@ def _window_data(data: StockData, window: TimeWindow, ttm: pd.DataFrame, crash: 
         returns = _drop_crash_days(returns, config)
         paired = _drop_crash_days(paired, config)
         ttm_rows = _drop_crash_periods(ttm_rows, config)
-        yoy = _drop_crash_periods(yoy, config)
+        # A missing revenue month still marks the window, whichever periods are dropped.
+        kept = _drop_crash_periods(yoy, config).index
+        yoy = yoy.loc[yoy.index.isin(kept) | yoy.get("gap", False)]
     return WindowData(returns, paired, ttm_rows, yoy)
 
 
