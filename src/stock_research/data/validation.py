@@ -54,6 +54,8 @@ __all__ = [
 ]
 
 PRICE_COLUMNS = ("open", "high", "low", "close")
+# Kept for completeness but read by no analysis (returns, risk and valuation use closes).
+UNUSED_PRICE_COLUMNS = frozenset({"open", "high", "low"})
 
 
 class IssueSeverity(StrEnum):
@@ -108,7 +110,8 @@ def check_price_completeness(
     """Nulls, negatives, zero prices, duplicate days, gaps; returns notices.
 
     Gaps covered by a known suspension of this ticker are expected and reported as a notice;
-    any other gap raises.
+    any other gap raises. A traded day without an open, high or low (FinMind records 0 on
+    some older days) is a warning, not a failure: every analysis uses closes and volume only.
     """
     if prices.empty:
         raise MissingDataError(ticker, "prices", "empty", "at least one row")
@@ -130,12 +133,24 @@ def check_price_completeness(
     priceless_no_trade = (
         no_price & (volume == 0) if volume is not None else pd.Series(False, index=prices.index)
     )
+    issues: list[ValidationIssue] = []
     for col in [*price_cols, "volume"]:
         if col not in prices:
             continue
         values = pd.to_numeric(prices[col], errors="coerce")
         null = values.isna() if col == "volume" else values.isna() & ~priceless_no_trade
-        if null.any():
+        if null.any() and col in UNUSED_PRICE_COLUMNS:
+            issues.append(
+                ValidationIssue(
+                    ticker,
+                    f"missing_{col}",
+                    IssueSeverity.WARNING,
+                    f"{int(null.sum())} traded day(s) without {col} (not used by any analysis; "
+                    f"first {_iso(dates[null])[0]})",
+                    tuple(dates[null]),
+                )
+            )
+        elif null.any():
             raise MissingDataError(ticker, col, _iso(dates[null]), "no null/NaN values")
         negative = values < 0
         if negative.any():
@@ -158,7 +173,6 @@ def check_price_completeness(
     if non_trading:
         raise AnomalyError(ticker, "date", _iso(non_trading), "rows only on trading days")
 
-    issues: list[ValidationIssue] = []
     if suspended:
         reasons = sorted({s.reason for s in suspensions for d in suspended if s.covers(d)})
         issues.append(

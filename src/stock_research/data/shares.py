@@ -40,6 +40,8 @@ from stock_research.data.fetchers.finmind import EventKind
 
 _LOSS_OFFSET = "Making up losses"
 _CASH_REFUND = "Cash refund"
+# FinMind labels some (mostly TPEx) reductions in Chinese.
+_REASON_ALIASES = {"彌補虧損": _LOSS_OFFSET, "現金減資": _CASH_REFUND}
 _RIGHTS = "權"  # in 權, 權息, 除權, 除權息: the event changes the share count
 _DIVIDEND = "息"
 
@@ -181,7 +183,7 @@ def _ex_rights_multiplier(
 def _reduction_multiplier(ticker: str, event: dict, par: float) -> float:
     before = float(event["close_before"])
     reference = float(event["reference_price"])
-    reason = event["detail"]
+    reason = _REASON_ALIASES.get(str(event["detail"]).strip(), event["detail"])
     if reason == _LOSS_OFFSET:
         return before / reference
     if reason == _CASH_REFUND:

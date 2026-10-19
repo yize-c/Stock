@@ -111,6 +111,20 @@ def test_bad_close_values(value, error, field) -> None:
     assert exc.value.field == field
 
 
+def test_traded_day_without_open_is_a_warning() -> None:
+    """FinMind records open = 0 on some older traded days; no analysis reads open/high/low."""
+    n = len(JULY_2024_CLOSES)
+    opens = [100.0] * n
+    opens[4] = float("nan")
+    issues = check_price_completeness("2330", prices(open=opens, high=[101.0] * n), CAL)
+    assert [(i.check, i.severity) for i in issues] == [("missing_open", IssueSeverity.WARNING)]
+    assert issues[0].dates == (JULY_2024_CLOSES[4],)
+    closes = [100.0] * n
+    closes[4] = float("nan")  # a close is still required
+    with pytest.raises(MissingDataError, match="close"):
+        check_price_completeness("2330", prices(closes, open=opens), CAL)
+
+
 def test_negative_volume() -> None:
     df = prices()
     df.loc[2, "volume"] = -5

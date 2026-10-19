@@ -140,6 +140,24 @@ def test_split_changes_par() -> None:
     assert basis.par_on(date(2022, 7, 12)) == 10.0 and basis.par_on(date(2022, 7, 13)) == 2.5
 
 
+@pytest.mark.parametrize(
+    ("fixture", "chinese"),
+    [
+        ("finmind_capital_reduction_2349.json", "彌補虧損"),
+        ("finmind_capital_reduction_3481.json", "現金減資"),
+    ],
+)
+def test_capital_reduction_reasons_in_chinese(fixture, chinese) -> None:
+    code = fixture[-9:-5]
+    events = applied(normalize_capital_reductions(rows(fixture), code))
+    english = share_basis(code, events, pd.DataFrame(), start=START, initial_par=10.0, tolerance=0)
+    renamed = share_basis(
+        code, events.assign(detail=chinese), pd.DataFrame(), start=START, initial_par=10.0,
+        tolerance=0,
+    )  # fmt: skip
+    assert renamed.multipliers["multiplier"].tolist() == english.multipliers["multiplier"].tolist()
+
+
 def test_capital_reductions() -> None:
     loss = applied(
         normalize_capital_reductions(rows("finmind_capital_reduction_2349.json"), "2349")
