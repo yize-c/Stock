@@ -388,7 +388,7 @@ def main() -> None:
             listed.append(when.year if when else "before 2002")
         except DataValidationError:
             listed.append("unknown")
-    print(pd.Series(listed).value_counts().sort_index().to_string(), flush=True)
+    print(pd.Series([str(x) for x in listed]).value_counts().sort_index().to_string(), flush=True)
 
     section("point-in-time scope: rows a dated failure would not reach")
     dated = failed.loc[failed["code"].isin(first_failure)]
