@@ -106,8 +106,9 @@ def test_gap_detected() -> None:
 def test_bad_close_values(value, error, field) -> None:
     closes = [100.0] * len(JULY_2024_CLOSES)
     closes[3] = value
+    opens = [100.0] * len(JULY_2024_CLOSES)  # another price that day: the close is missing
     with pytest.raises(error) as exc:
-        check_price_completeness("2330", prices(closes), CAL)
+        check_price_completeness("2330", prices(closes, open=opens), CAL)
     assert exc.value.field == field
 
 
@@ -120,7 +121,7 @@ def test_traded_day_without_open_is_a_warning() -> None:
     assert [(i.check, i.severity) for i in issues] == [("missing_open", IssueSeverity.WARNING)]
     assert issues[0].dates == (JULY_2024_CLOSES[4],)
     closes = [100.0] * n
-    closes[4] = float("nan")  # a close is still required
+    closes[3] = float("nan")  # a close is still required when the day has other prices
     with pytest.raises(MissingDataError, match="close"):
         check_price_completeness("2330", prices(closes, open=opens), CAL)
 
@@ -319,11 +320,15 @@ def test_priceless_no_trade_day_is_notice_not_error() -> None:
     assert issues[0].check == "no_trades" and "1 of them have no price" in issues[0].detail
 
 
-def test_missing_price_with_volume_is_still_an_error() -> None:
+def test_volume_without_any_price_is_a_day_without_a_close() -> None:
+    """FinMind: 443 stocks have such days, at a sliver of the usual volume (user decision
+    2026-10-19): a warning, and the day counts as one without a close."""
     df = prices()
-    df.loc[4, "close"] = float("nan")  # volume 1000 but no close
-    with pytest.raises(MissingDataError, match="close"):
-        check_price_completeness("2330", df, CAL)
+    df["open"] = df["close"]
+    df.loc[4, ["open", "close"]] = float("nan")  # volume 1000 but no price at all
+    issues = check_price_completeness("2330", df, CAL)
+    assert [(i.check, i.severity) for i in issues] == [("unpriced", IssueSeverity.WARNING)]
+    assert issues[0].dates == (JULY_2024_CLOSES[4],)
 
 
 def test_partially_missing_prices_on_no_trade_day_is_error() -> None:

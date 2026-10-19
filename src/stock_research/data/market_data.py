@@ -31,7 +31,12 @@ import requests
 from stock_research.config import AppConfig, KnownSuspension, ManualClosure, Secrets
 from stock_research.data.adjustment import AdjustedPrices, adjust_prices
 from stock_research.data.cache import Cache
-from stock_research.data.early_changes import UncoveredCapitalChange, uncovered_capital_changes
+from stock_research.data.early_changes import (
+    UncoveredCapitalChange,
+    UncoveredLimitBreaks,
+    uncovered_capital_changes,
+    uncovered_limit_breaks,
+)
 from stock_research.data.errors import (
     AnomalyError,
     DataValidationError,
@@ -62,6 +67,7 @@ from stock_research.data.validation import (
     check_monthly_revenue,
     check_price_completeness,
     check_price_limits,
+    unpriced_days,
 )
 from stock_research.markets.calendar import (
     CalendarConflictError,
@@ -152,6 +158,7 @@ class _Memo:
     raw: dict[str, tuple[pd.DataFrame, pd.DataFrame]] = field(default_factory=dict)
     daily: dict[str, pd.DataFrame] = field(default_factory=dict)
     uncovered: dict[str, list[UncoveredCapitalChange]] = field(default_factory=dict)
+    limit_breaks: dict[str, UncoveredLimitBreaks | None] = field(default_factory=dict)
     risk_free: RiskFreeRates | None = None
     official_listing: dict[str, date] | None = None
 
@@ -406,7 +413,11 @@ class MarketData:
         return self._memo.official_listing.get(ticker.code)
 
     def prices(self, ticker: Ticker, as_of: date) -> AdjustedPrices:
-        """Listed-period prices from ``price_history_start`` on, adjusted as of ``as_of``."""
+        """Listed-period prices from ``price_history_start`` on, adjusted as of ``as_of``.
+
+        Before FinMind's event coverage (2011) the history starts after the last unexplained
+        halt or move beyond the limit instead (``data/early_changes.py``).
+        """
         raw, events = self._raw_prices(ticker)
         listing = self.listing_date(ticker)
         start = self._config.data_sources.finmind.price_history_start
@@ -419,6 +430,17 @@ class MarketData:
         uncovered = self.uncovered_capital_changes(ticker, raw, events, as_of)
         if uncovered:
             raw = raw.loc[pd.to_datetime(raw["date"]) >= pd.Timestamp(uncovered[-1].resumed)]
+        adjusted = adjust_prices(ticker.code, raw.reset_index(drop=True), events, as_of)
+        breaks = uncovered_limit_breaks(
+            adjusted,
+            coverage_start=self._config.data_sources.finmind.capital_reduction_coverage_start,
+            limits=self._tw.price_limits,
+            listing_date=listing,
+        )
+        self._memo.limit_breaks[ticker.code] = breaks
+        if breaks is None:
+            return adjusted
+        raw = raw.loc[pd.to_datetime(raw["date"]) >= pd.Timestamp(breaks.last)]
         return adjust_prices(ticker.code, raw.reset_index(drop=True), events, as_of)
 
     def uncovered_capital_changes(
@@ -580,6 +602,9 @@ class MarketData:
         if prices is not None:
             for change in self._memo.uncovered.get(ticker.code, []):
                 report.limitations.append(change.describe(ticker.code))
+            breaks = self._memo.limit_breaks.get(ticker.code)
+            if breaks is not None:
+                report.limitations.append(breaks.describe(ticker.code))
             self._price_checks(report, ticker, prices, calendar, as_of, now, cross_source)
         bench = _attempt(report, "benchmark.fetch", lambda: self.benchmark(as_of))
         if bench is not None:
@@ -692,6 +717,7 @@ class MarketData:
                 listing_date=listing,
                 ex_rights_reference=prices.ex_rights_reference(),
                 capital_change_resumptions=prices.capital_change_resumptions(),
+                unpriced_days=unpriced_days(raw),
             ),
         )
         _attempt(

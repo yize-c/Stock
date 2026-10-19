@@ -83,3 +83,44 @@ def test_explained_short_or_late_halts_are_ignored() -> None:
 def test_ordinary_weekends_and_holidays_are_not_halts() -> None:
     days = weekdays(date(2008, 1, 2), 60)
     assert run(prices({d: 10.0 + i * 0.01 for i, d in enumerate(days)})) == []
+
+
+def _adjusted(closes: dict[date, float], volume: dict[date, float] | None = None):
+    from stock_research.data.adjustment import adjust_prices
+
+    raw = prices(closes)
+    raw = raw.assign(open=raw["close"], high=raw["close"], low=raw["close"],
+                     volume=[(volume or {}).get(d, 1000.0) for d in closes])  # fmt: skip
+    events = pd.DataFrame(columns=["date", "kind", "close_before", "reference_price", "detail"])
+    return adjust_prices("1234", raw, events, date(2026, 10, 15))
+
+
+def test_breaks_before_2011_start_the_history_on_the_last_one() -> None:
+    """User decision 2026-10-19: FinMind misses early ex-rights results (2007's ex-dividend
+    season), so a pre-2011 move beyond the limit that no event explains is not investigated."""
+    from stock_research.data.early_changes import uncovered_limit_breaks
+
+    days = weekdays(date(2007, 7, 2), 400)
+    closes = dict.fromkeys(days, 50.0)
+    closes |= dict.fromkeys(days[10:], 42.0)  # -16% in 2007: no event
+    closes |= dict.fromkeys(days[200:], 46.0)  # +9.5% in 2008: beyond 7% too
+    found = uncovered_limit_breaks(
+        _adjusted(closes), coverage_start=date(2011, 1, 1), limits=LIMITS, listing_date=None
+    )
+    assert found is not None and found.count == 2 and found.last == days[200]
+    assert "前的股價未使用" in found.describe("1234") and "2011 年前" in found.describe("1234")
+    later = {d + timedelta(days=365 * 5): c for d, c in closes.items()}  # all after 2011
+    assert uncovered_limit_breaks(
+        _adjusted(later), coverage_start=date(2011, 1, 1), limits=LIMITS, listing_date=None
+    ) is None  # fmt: skip
+
+
+def test_the_limit_compounds_over_days_without_a_price() -> None:
+    """A close two days after a day with volume but no price may move up to (1.07)^2 - 1."""
+    from stock_research.data.validation import price_limit_breaches
+
+    days = weekdays(date(2009, 3, 2), 6)
+    closes = {days[0]: 100.0, days[1]: 100.0, days[3]: 112.0, days[4]: 112.0, days[5]: 112.0}
+    frame = prices(closes)
+    assert price_limit_breaches(frame, LIMITS) != []  # +12% in one step breaks 7%
+    assert price_limit_breaches(frame, LIMITS, unpriced_days=[days[2]]) == []  # 1.07^2 = 14.5%
