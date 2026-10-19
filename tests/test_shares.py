@@ -247,3 +247,25 @@ def test_share_counts_from_statements() -> None:
     )
     implied, capital = share_counts(financials, basis)
     assert implied[date(2019, 12, 31)] == 100.0 and capital[date(2019, 12, 31)] == 100.0
+
+
+def test_share_counts_without_a_parent_line_use_net_income_less_nci() -> None:
+    """73 stocks in the full-market calibration report no parent line (no NCI)."""
+    end = date(2019, 12, 31)
+
+    def line(statement, item, value):
+        return {"statement": statement, "item": item, "period_end": end, "value": value}
+
+    basis = share_basis(
+        "x", pd.DataFrame(), pd.DataFrame(), start=START, initial_par=10.0, tolerance=0
+    )
+    rows = [
+        line("income", "EPS", 2.0),
+        line("income", "IncomeAfterTaxes", 200.0),
+        line("balance", "OrdinaryShare", 1000.0),
+    ]
+    implied, _ = share_counts(pd.DataFrame(rows), basis)
+    assert implied[end] == 100.0
+    with_nci = [*rows, line("income", "NoncontrollingInterests", 20.0)]
+    implied, _ = share_counts(pd.DataFrame(with_nci), basis)
+    assert implied[end] == 90.0

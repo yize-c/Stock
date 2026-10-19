@@ -239,7 +239,11 @@ def share_counts(financials: pd.DataFrame, basis: ShareBasis) -> tuple[pd.Series
         return rows.set_index(pd.to_datetime(rows["period_end"]).dt.date)["value"].astype(float)
 
     eps = item("income", "EPS")
-    implied = item("income", "EquityAttributableToOwnersOfParent") / eps.where(eps != 0)
+    # Without a parent line (no non-controlling interests): net income less the NCI share.
+    net = item("income", "IncomeAfterTaxes").combine_first(item("income", "IncomeAfterTax"))
+    nci = item("income", "NoncontrollingInterests").reindex(net.index).fillna(0.0)
+    parent = item("income", "EquityAttributableToOwnersOfParent").combine_first(net - nci)
+    implied = parent / eps.where(eps != 0)
     capital = item("balance", "OrdinaryShare")
     pars = np.array([basis.par_on(d) for d in capital.index])
     return implied.replace([np.inf, -np.inf], np.nan), capital / pars

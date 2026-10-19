@@ -333,14 +333,20 @@ class MarketData:
         """The day the stock started trading as a listed share, or None if it first traded
         before the emerging board existed (so the data holds no pre-listing prices).
 
-        Order: a config override; else, for a stock that first traded on or after the
-        emerging board's start, the first TaiwanStockPER day on or after its first trade
-        (codes are reused, so earlier valuation days may belong to another company). That day
-        is only meaningful after the valuation dataset's coverage starts; otherwise it raises.
+        Order: a config override; else, for a listed TPEx stock, TPEx's own listing date
+        (FinMind's TPEx valuation days only start in 2007 and can lag a listing by months);
+        else, for a stock that first traded on or after the emerging board's start, the first
+        TaiwanStockPER day on or after its first trade (codes are reused, so earlier valuation
+        days may belong to another company). That day is only meaningful after the valuation
+        dataset's coverage starts; otherwise it raises.
         """
         overrides = {o.ticker: o.listing_date for o in self._tw.listing.overrides}
         if ticker.code in overrides:
             return overrides[ticker.code]
+        if ticker.market is Market.TPEX and ticker.code not in self.delisting_dates():
+            official = self.official_listing_date(ticker)
+            if official is not None:
+                return official
         first_traded = min(self.raw_daily(ticker)["date"])
         if first_traded < self._tw.listing.emerging_board_start:
             return None
@@ -523,7 +529,9 @@ class MarketData:
         """Share multipliers from the price events applied as of ``as_of``.
 
         The basis starts at the IFRS start. Par at that date is TPEx's official par (TPEx
-        stocks, backed out through every later split) or the configured default (TWSE).
+        stocks, backed out through every later split) or the configured default (TWSE, and
+        delisted TPEx stocks, which TPEx no longer lists); the share-count check then catches
+        a wrong default.
         """
         per_share = self._tw.per_share
         start = date(self._config.general.ifrs_start_year, 1, 1)
@@ -532,15 +540,16 @@ class MarketData:
         if ticker.market is Market.TPEX and self._tpex is not None:
             companies = self._tpex.listed_companies()
             row = companies.loc[companies["code"] == ticker.code]
-            if row.empty:
+            if row.empty and ticker.code not in self.delisting_dates():
                 raise MissingDataError(ticker.code, "tpex:par_value", "absent", "a TPEx listing")
-            all_events = self.prices(ticker, self.today()).events
-            splits = all_events.loc[
-                (all_events["kind"] == EventKind.SPLIT.value)
-                & np.array([d >= start for d in all_events["effective_date"]], dtype=bool)
-            ]
-            ratio = float((splits["close_before"] / splits["reference_price"]).prod())
-            initial_par = float(row["par_value"].iloc[0]) * ratio
+            if not row.empty:
+                all_events = self.prices(ticker, self.today()).events
+                splits = all_events.loc[
+                    (all_events["kind"] == EventKind.SPLIT.value)
+                    & np.array([d >= start for d in all_events["effective_date"]], dtype=bool)
+                ]
+                ratio = float((splits["close_before"] / splits["reference_price"]).prod())
+                initial_par = float(row["par_value"].iloc[0]) * ratio
         return share_basis(
             ticker.code,
             events,
@@ -625,6 +634,8 @@ class MarketData:
         assert self._tpex is not None
         companies = self._tpex.listed_companies()
         row = companies.loc[companies["code"] == ticker.code]
+        if row.empty and ticker.code in self.delisting_dates():
+            return  # TPEx lists current companies only: nothing to compare a delisted one with
         if row.empty:
             raise MissingDataError(ticker.code, "tpex:listed_companies", "absent", "a TPEx listing")
         official = row["listing_date"].iloc[0]
