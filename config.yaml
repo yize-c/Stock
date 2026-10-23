@@ -436,6 +436,11 @@ data_sources:
     min_request_interval_seconds: 1.0
   # Cached responses older than this are refetched, never served as current data.
   cache_max_age_hours: 12
+  # Also refetch responses fetched before the latest daily_data_ready_time (any day): a run
+  # after the close must not reuse the morning's data (the 2026-10-23 18:28 manual export
+  # served a 07:26 cache without that day's close and failed the freshness check). The
+  # calibration turns this off: it reads a fixed past date from a cache kept for days.
+  refetch_after_data_ready: true
   request_timeout_seconds: 60
   # A dropped connection (no response at all; TPEx's OpenAPI cut one off on 2026-10-20 and
   # failed that day's export) is retried twice, after 10 s and 20 s. Status codes, block

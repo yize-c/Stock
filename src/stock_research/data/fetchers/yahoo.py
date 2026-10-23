@@ -57,12 +57,14 @@ class YahooFetcher:
         cache: Cache | None = None,
         *,
         max_age: timedelta,
+        fetched_since: datetime | None = None,
         downloader: Downloader = yfinance_downloader,
     ) -> None:
         self._market = market
         self._limiter = limiter
         self._cache = cache
         self._max_age = max_age
+        self._fetched_since = fetched_since
         self._download = downloader
 
     def history(self, ticker: Ticker, start: date, end: date) -> pd.DataFrame:
@@ -77,7 +79,9 @@ class YahooFetcher:
             raise ValueError(f"end {end} is before start {start}")
         params = {"symbol": symbol, "start": start.isoformat(), "end": end.isoformat()}
         if self._cache is not None:
-            hit = self._cache.get_raw(SOURCE, "history", params, max_age=self._max_age)
+            hit = self._cache.get_raw(
+                SOURCE, "history", params, max_age=self._max_age, fetched_since=self._fetched_since
+            )
             if hit is not None:
                 return _from_json(hit.payload)
 

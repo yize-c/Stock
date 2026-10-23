@@ -119,9 +119,12 @@ class JsonClient:
         quota_wait_seconds: float = 0.0,
         network_retries: int = 0,
         network_wait_seconds: float = 0.0,
+        fetched_since: datetime | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.source = source
+        # Cached responses fetched before this moment are refetched (see MarketData.open).
+        self._fetched_since = fetched_since
         # Batch runs may wait out an exhausted quota (e.g. FinMind's hourly limit) instead of
         # failing every remaining request; interactive runs keep the default of no waiting.
         self._quota_retries = quota_retries
@@ -180,7 +183,9 @@ class JsonClient:
         """
         params = dict(params or {})
         if self._cache is not None and max_age is not None:
-            hit = self._cache.get_raw(self.source, url, params, max_age=max_age)
+            hit = self._cache.get_raw(
+                self.source, url, params, max_age=max_age, fetched_since=self._fetched_since
+            )
             if hit is not None:
                 return JsonResult(json.loads(hit.payload), hit.fetched_at, from_cache=True)
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -29,6 +29,19 @@ def test_json_returned_and_cached() -> None:
         second = c.get_json(URL, {"x": 1}, max_age=timedelta(hours=1))
     assert first.data == [{"a": 1}] and not first.from_cache
     assert second.data == [{"a": 1}] and second.from_cache
+    assert len(session.calls) == 1
+
+
+def test_responses_cached_before_fetched_since_are_refetched() -> None:
+    with Cache(":memory:") as cache:
+        cache.put_raw("src", URL, {}, "[1]", fetched_at=datetime.now(UTC) - timedelta(hours=4))
+        session = FakeSession([FakeResponse(200, "[2]")])
+        since = datetime.now(UTC) - timedelta(hours=2)
+        c = JsonClient("src", session, RateLimiter(), cache, fetched_since=since)
+        assert c.get_json(URL, max_age=timedelta(hours=12)).data == [2]
+        assert c.get_json(URL, max_age=timedelta(hours=12)).from_cache  # the new one is served
+        plain = JsonClient("src", FakeSession([]), RateLimiter(), cache)
+        assert plain.get_json(URL, max_age=timedelta(hours=12)).data == [2]
     assert len(session.calls) == 1
 
 

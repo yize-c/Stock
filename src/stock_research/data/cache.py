@@ -104,8 +104,11 @@ class Cache:
         params: Mapping[str, Any],
         max_age: timedelta | None,
         now: datetime | None = None,
+        *,
+        fetched_since: datetime | None = None,
     ) -> CachedPayload | None:
-        """Newest cached payload, or None if absent or older than ``max_age``."""
+        """Newest cached payload, or None if absent, older than ``max_age`` or fetched before
+        ``fetched_since``."""
         row = self._conn.execute(
             "SELECT fetched_at, payload FROM raw_responses "
             "WHERE source = ? AND endpoint = ? AND params = ? "
@@ -116,6 +119,8 @@ class Cache:
             return None
         fetched_at = datetime.fromisoformat(row[0])
         if max_age is not None and _utc(now or datetime.now(UTC)) - fetched_at > max_age:
+            return None
+        if fetched_since is not None and fetched_at < _utc(fetched_since):
             return None
         return CachedPayload(source=source, fetched_at=fetched_at, payload=row[1])
 

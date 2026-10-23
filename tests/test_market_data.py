@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
@@ -16,7 +17,7 @@ from stock_research.data.fetchers.finmind import FinMindClient, FinMindFetcher
 from stock_research.data.fetchers.tpex import BASE_URL, TpexFetcher
 from stock_research.data.fetchers.yahoo import YahooFetcher
 from stock_research.data.http import JsonClient, RateLimiter
-from stock_research.data.market_data import MarketData, calendar_from_sources
+from stock_research.data.market_data import MarketData, calendar_from_sources, latest_data_ready
 from stock_research.data.windows import WindowName
 from stock_research.markets.calendar import CalendarConflictError, CalendarCoverageError
 from stock_research.markets.tickers import Market, Ticker
@@ -564,6 +565,42 @@ def test_open_wires_real_clients_without_network(raw_config, write_config, monke
     with Cache(":memory:") as cache:
         md = MarketData.open(config, Secrets(None), cache)
         assert isinstance(md, MarketData) and md.today() >= date(2026, 1, 1)
+        # Responses cached before the latest data-ready time are refetched; peers keep theirs.
+        since = md._finmind._client._client._fetched_since
+        assert since is not None and since <= datetime.now(UTC) < since + timedelta(days=1)
+        assert md._tpex._client._fetched_since == md._twse._client._fetched_since == since
+        assert md._yahoo._fetched_since == since
+        assert md._peer_finmind._client._client._fetched_since is None
+        assert md._finmind._client._max_age == timedelta(hours=12)
+
+
+def test_open_has_no_data_ready_cut_off_when_it_is_off(
+    raw_config, write_config, monkeypatch
+) -> None:
+    monkeypatch.setenv("FINMIND_TOKEN", "tok")
+    raw_config["data_sources"]["refetch_after_data_ready"] = False
+    config = load_config(write_config(raw_config))
+    with Cache(":memory:") as cache:
+        md = MarketData.open(config, Secrets(None), cache)
+        assert md._finmind._client._client._fetched_since is None
+        assert md._tpex._client._fetched_since is md._yahoo._fetched_since is None
+
+
+def test_latest_data_ready_is_the_last_ready_moment_on_any_day() -> None:
+    tz = ZoneInfo("Asia/Taipei")
+    ready = time(14, 30)
+    today = datetime(2026, 10, 23, 14, 30, tzinfo=tz)
+    # 18:28: a 07:26 response lacks that day's close (2026-10-23's manual export).
+    evening = datetime(2026, 10, 23, 18, 28, tzinfo=tz)
+    assert latest_data_ready(ready, tz, evening) == today
+    assert latest_data_ready(ready, tz, evening.astimezone(UTC)) == today
+    assert latest_data_ready(ready, tz, today) == today
+    # The scheduled 04:17 export: the previous day's 14:30.
+    early = datetime(2026, 10, 23, 4, 17, tzinfo=tz)
+    assert latest_data_ready(ready, tz, early) == today - timedelta(days=1)
+    # Holidays count too (2026-10-25 is a Sunday).
+    sunday = datetime(2026, 10, 25, 15, 0, tzinfo=tz)
+    assert latest_data_ready(ready, tz, sunday) == datetime(2026, 10, 25, 14, 30, tzinfo=tz)
 
 
 # --- industries and peers -------------------------------------------------------------------------

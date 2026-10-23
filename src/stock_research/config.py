@@ -556,6 +556,8 @@ class DataSourcesConfig(_Model):
     official: OfficialSourceConfig
     yahoo: YahooSourceConfig
     cache_max_age_hours: PositiveFloat
+    # Responses fetched before the latest daily data-ready time are refetched as well.
+    refetch_after_data_ready: bool
     request_timeout_seconds: PositiveFloat
     # A dropped connection (no response at all) is retried this many times, the pause
     # doubling from network_retry_wait_seconds; any other failure is never retried.
