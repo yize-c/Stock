@@ -8,6 +8,7 @@ from stock_research.data.cache import Cache
 from stock_research.data.http import (
     JsonClient,
     RateLimiter,
+    SourceConnectionError,
     SourceRateLimitedError,
     SourceUnavailableError,
 )
@@ -109,6 +110,38 @@ def test_quota_retries_run_out_and_default_never_waits() -> None:
     plain, _ = client([limited])
     with pytest.raises(SourceRateLimitedError):
         plain.get_json(URL, max_age=None, check=_quota_check)
+
+
+def test_a_dropped_connection_is_retried_after_a_growing_pause() -> None:
+    """TPEx's OpenAPI cut a response short on 2026-10-20 and failed that day's export."""
+    ok = FakeResponse(200, "[1]")
+    slept: list[float] = []
+    dropped = ConnectionError("Response ended prematurely")
+    session = FakeSession([dropped, dropped, ok])
+    c = JsonClient(
+        "src", session, RateLimiter(), network_retries=2, network_wait_seconds=10,
+        sleep=slept.append,
+    )  # fmt: skip
+    assert c.get_json(URL, max_age=None).data == [1]
+    assert slept == [10, 20] and len(session.calls) == 3
+
+
+def test_network_retries_run_out_and_other_failures_are_never_retried() -> None:
+    slept: list[float] = []
+    dropped = ConnectionError("reset")
+    c = JsonClient(
+        "src", FakeSession([dropped] * 2), RateLimiter(), network_retries=1,
+        network_wait_seconds=5, sleep=slept.append,
+    )  # fmt: skip
+    with pytest.raises(SourceConnectionError, match="reset"):
+        c.get_json(URL, max_age=None)
+    assert slept == [5]
+    for failure in (FakeResponse(503, "down"), FakeResponse(200, "<html>blocked</html>")):
+        session = FakeSession([failure])
+        c = JsonClient("src", session, RateLimiter(), network_retries=3, sleep=slept.append)
+        with pytest.raises(SourceUnavailableError):
+            c.get_json(URL, max_age=None)
+        assert len(session.calls) == 1
 
 
 def test_auth_headers_sent_but_not_in_cache_key() -> None:

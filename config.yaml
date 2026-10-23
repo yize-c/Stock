@@ -437,6 +437,11 @@ data_sources:
   # Cached responses older than this are refetched, never served as current data.
   cache_max_age_hours: 12
   request_timeout_seconds: 60
+  # A dropped connection (no response at all; TPEx's OpenAPI cut one off on 2026-10-20 and
+  # failed that day's export) is retried twice, after 10 s and 20 s. Status codes, block
+  # pages and bad JSON are never retried.
+  network_retries: 2
+  network_retry_wait_seconds: 10
   # Mainstream sites are never scraped by default; reports only link to them.
   scrape_reference_sites: false
 

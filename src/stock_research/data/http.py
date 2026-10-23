@@ -2,13 +2,16 @@
 
 Failures are explicit. A non-200 status, an HTML page where JSON was expected (some sites
 answer *200* with a firewall block page), or unparsable JSON all raise
-``SourceUnavailableError``. Nothing is retried silently, and stale cache entries are never
-served in place of a failed request.
+``SourceUnavailableError`` and are never retried. Only a dropped connection (no response at
+all, e.g. TPEx's OpenAPI ending a response early) is retried, up to ``network_retries`` times
+after a growing pause, each retry logged; then it raises like the rest. Stale cache entries
+are never served in place of a failed request.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import time
 from collections import deque
 from collections.abc import Callable, Mapping
@@ -31,6 +34,13 @@ class SourceUnavailableError(MissingDataError):
 
 class SourceRateLimitedError(SourceUnavailableError):
     """The source reports that its request quota is used up."""
+
+
+class SourceConnectionError(SourceUnavailableError):
+    """No response at all: the connection failed or was cut off."""
+
+
+_LOG = logging.getLogger(__name__)
 
 
 class _Response(Protocol):
@@ -107,6 +117,8 @@ class JsonClient:
         headers: Mapping[str, str] | None = None,
         quota_retries: int = 0,
         quota_wait_seconds: float = 0.0,
+        network_retries: int = 0,
+        network_wait_seconds: float = 0.0,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.source = source
@@ -114,6 +126,8 @@ class JsonClient:
         # failing every remaining request; interactive runs keep the default of no waiting.
         self._quota_retries = quota_retries
         self._quota_wait = quota_wait_seconds
+        self._network_retries = network_retries
+        self._network_wait = network_wait_seconds
         self._sleep = sleep
         self._session = session
         self._limiter = limiter
@@ -129,15 +143,26 @@ class JsonClient:
         max_age: timedelta | None,
         check: Callable[[Any], None] | None = None,
     ) -> JsonResult:
-        """``_get_json`` plus waiting out an exhausted quota up to ``quota_retries`` times."""
-        for attempt in range(self._quota_retries + 1):
+        """``_get_json`` plus waiting out an exhausted quota up to ``quota_retries`` times
+        and retrying a dropped connection up to ``network_retries`` times (the pause doubles
+        each time)."""
+        quota_used = network_used = 0
+        while True:
             try:
                 return self._get_json(url, params, max_age=max_age, check=check)
             except SourceRateLimitedError:
-                if attempt == self._quota_retries:
+                if quota_used == self._quota_retries:
                     raise
+                quota_used += 1
                 self._sleep(self._quota_wait)
-        raise AssertionError("unreachable")
+            except SourceConnectionError as exc:
+                if network_used == self._network_retries:
+                    raise
+                wait = self._network_wait * 2**network_used
+                network_used += 1
+                _LOG.warning("%s: %s; retry %d in %.0f s", self.source, exc.actual, network_used,
+                             wait)  # fmt: skip
+                self._sleep(wait)
 
     def _get_json(
         self,
@@ -165,7 +190,7 @@ class JsonClient:
                 url, params=params, headers=self._headers, timeout=self._timeout
             )
         except Exception as exc:  # network errors from the HTTP library
-            raise SourceUnavailableError(
+            raise SourceConnectionError(
                 self.source, url, f"{type(exc).__name__}: {exc}", "a response"
             ) from exc
         fetched_at = datetime.now(UTC)
