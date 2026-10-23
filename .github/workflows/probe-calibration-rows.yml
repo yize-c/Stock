@@ -1,9 +1,10 @@
 name: Probe calibration exclusions
 
-# Why the full-market calibration run 39162884540 excluded rows (DATA_CHECK_FAILED, ERROR,
-# NO_SCORE): reads that run's row artifacts and the calibration cache, prints the dated causes
-# (scripts/probe_calibration_followup.py; earlier: probe_calibration_rows.py, _details.py).
-# Read-only; prints dates, counts, check names, labels, codes and derived statistics only.
+# Prints the result file of the 條件符合度 calibration run 39903390753 (artifact
+# score-calibration) in numbered chunks, with its SHA-256, so the file can be rebuilt where
+# the artifact store is unreachable and committed for the site. The file holds derived
+# values only (scores, group statistics, validation results). Earlier this workflow ran the
+# exclusion probes (scripts/probe_calibration_rows.py, _details.py, _followup.py).
 on:
   workflow_dispatch:
 
@@ -14,28 +15,24 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/download-artifact@v8
         with:
-          python-version: "3.11"
-      - run: uv sync --locked
-      - name: Restore calibration cache
-        uses: actions/cache/restore@v4
-        with:
-          path: .cache/calibration
-          key: calibration-none
-          restore-keys: calibration-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: calibration-rows-*
-          path: calibration/work
-          merge-multiple: true
-          run-id: 39162884540
+          name: score-calibration
+          path: result
+          run-id: 39903390753
           github-token: ${{ github.token }}
-      - name: Breakdown
-        env:
-          FINMIND_TOKEN: ${{ secrets.SECOND_FINMIND }}
+      - name: Print the result in chunks
         run: |
-          uv run python scripts/probe_calibration_followup.py
+          python3 - <<'PY'
+          import hashlib, json, pathlib
+          raw = pathlib.Path("result/score_calibration.json").read_bytes()
+          print("sha256", hashlib.sha256(raw).hexdigest(), "bytes", len(raw))
+          text = json.dumps(json.loads(raw), ensure_ascii=True, separators=(",", ":"))
+          print("compact_sha256", hashlib.sha256(text.encode()).hexdigest(), "chars", len(text))
+          size = 2000
+          for n, start in enumerate(range(0, len(text), size)):
+              print(f"CHUNK {n:05d} {text[start:start + size]}")
+          print("END", (len(text) + size - 1) // size)
+          PY
