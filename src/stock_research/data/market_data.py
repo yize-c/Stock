@@ -838,6 +838,10 @@ class MarketData:
         finmind = sources.finmind
         session = requests.Session()
         max_age = timedelta(hours=sources.cache_max_age_hours)
+        retries = {
+            "network_retries": sources.network_retries,
+            "network_wait_seconds": sources.network_retry_wait_seconds,
+        }
         finmind_http = JsonClient(
             "finmind",
             session,
@@ -847,6 +851,7 @@ class MarketData:
             headers=auth_headers(secrets.get(Secrets.FINMIND_TOKEN)),
             quota_retries=finmind.quota_retries if wait_on_quota else 0,
             quota_wait_seconds=finmind.quota_wait_minutes * 60,
+            **retries,
         )
         tpex_http = JsonClient(
             "tpex",
@@ -854,6 +859,7 @@ class MarketData:
             RateLimiter(sources.official.min_request_interval_seconds),
             cache,
             timeout_seconds=sources.request_timeout_seconds,
+            **retries,
         )
         peer_age = timedelta(days=config.markets.tw.industries.peers.cache_max_age_days)
         return cls(
@@ -888,6 +894,7 @@ class MarketData:
                     RateLimiter(sources.official.min_request_interval_seconds),
                     cache,
                     timeout_seconds=sources.request_timeout_seconds,
+                    **retries,
                 ),
                 max_age,
             ),

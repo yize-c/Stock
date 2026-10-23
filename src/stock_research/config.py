@@ -557,6 +557,10 @@ class DataSourcesConfig(_Model):
     yahoo: YahooSourceConfig
     cache_max_age_hours: PositiveFloat
     request_timeout_seconds: PositiveFloat
+    # A dropped connection (no response at all) is retried this many times, the pause
+    # doubling from network_retry_wait_seconds; any other failure is never retried.
+    network_retries: Annotated[int, Field(ge=0)]
+    network_retry_wait_seconds: PositiveFloat
     scrape_reference_sites: bool
 
 
