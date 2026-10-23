@@ -1,10 +1,10 @@
-name: Probe calibration exclusions
+name: Probe export result
 
-# Prints the result file of the 條件符合度 calibration run 39903390753 (artifact
-# score-calibration) in numbered chunks, with its SHA-256, so the file can be rebuilt where
-# the artifact store is unreachable and committed for the site. The file holds derived
-# values only (scores, group statistics, validation results). Earlier this workflow ran the
-# exclusion probes (scripts/probe_calibration_rows.py, _details.py, _followup.py).
+# Summarises the daily export run 39943481791 (job 120380345198) and the site it published:
+# the export's own summary lines, when each stock started (the run took an hour instead of
+# the usual eight minutes) and how many stocks show a 條件符合度 score. The published site
+# holds computed values only. Earlier this workflow printed the calibration result file and
+# ran the exclusion probes (scripts/probe_calibration_rows.py, _details.py, _followup.py).
 on:
   workflow_dispatch:
 
@@ -15,24 +15,46 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@v8
-        with:
-          name: score-calibration
-          path: result
-          run-id: 39903390753
-          github-token: ${{ github.token }}
-      - name: Print the result in chunks
+      - name: Export log
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          gh api "repos/${{ github.repository }}/actions/jobs/120380345198/logs" > job.log
+          echo "lines $(wc -l < job.log)"
+          echo "--- summary"
+          grep -E "as_of 20[0-9-]+: [0-9]+ ok|^\S+ +[0-9]{4}: |nothing should be published" job.log || true
+          echo "--- per stock start"
+          grep -E "analysing as of" job.log | awk '{print substr($1, 12, 8), $2}'
+          echo "--- warnings by kind"
+          grep -E "WARNING|retry|quota|402|wait" job.log | sed -E 's/^\S+ //' | cut -c1-80 \
+            | sort | uniq -c | sort -rn | head -20
+      - name: Published site
+        run: |
+          curl -sSf https://yize-c.github.io/Stock/data/index.json -o index.json
           python3 - <<'PY'
-          import hashlib, json, pathlib
-          raw = pathlib.Path("result/score_calibration.json").read_bytes()
-          print("sha256", hashlib.sha256(raw).hexdigest(), "bytes", len(raw))
-          text = json.dumps(json.loads(raw), ensure_ascii=True, separators=(",", ":"))
-          print("compact_sha256", hashlib.sha256(text.encode()).hexdigest(), "chars", len(text))
-          size = 2000
-          for n, start in enumerate(range(0, len(text), size)):
-              print(f"CHUNK {n:05d} {text[start:start + size]}")
-          print("END", (len(text) + size - 1) // size)
+          import collections, json
+          index = json.load(open("index.json"))
+          print("as_of", index["as_of"], "generated_at", index["generated_at"])
+          stocks = index["stocks"]
+          print("stocks", len(stocks), collections.Counter(s["status"] for s in stocks))
+          default = str(index["default_capital"])
+          scored = [s for s in stocks if (s.get("score") or {}).get("available")]
+          print("with a score", len(scored))
+          labels = collections.Counter(s["score"]["tiers"][default]["label"] for s in scored)
+          print("labels at the default capital", dict(labels))
+          reasons = collections.Counter(
+              (s.get("score") or {}).get("reason") or s.get("problem") for s in stocks
+              if not (s.get("score") or {}).get("available")
+          )
+          print("without a score", dict(reasons))
+          PY
+          curl -sSf https://yize-c.github.io/Stock/data/stocks/2330.json -o 2330.json
+          python3 - <<'PY'
+          import json
+          research = json.load(open("2330.json"))["research_score"]
+          print("2330 available", research.get("available"), "validated", research.get("validated"))
+          for v in research.get("validations") or []:
+              print(" ", v["key"], v["name"], "passed" if v["passed"] else "not passed")
           PY
