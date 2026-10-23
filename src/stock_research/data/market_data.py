@@ -838,34 +838,49 @@ class MarketData:
         finmind = sources.finmind
         session = requests.Session()
         max_age = timedelta(hours=sources.cache_max_age_hours)
+        since = (
+            latest_data_ready(
+                config.markets.tw.trading_calendar.daily_data_ready_time,
+                ZoneInfo(config.general.timezone),
+                datetime.now(UTC),  # the cache ages responses by the real clock
+            )
+            if sources.refetch_after_data_ready
+            else None
+        )
         retries = {
             "network_retries": sources.network_retries,
             "network_wait_seconds": sources.network_retry_wait_seconds,
         }
-        finmind_http = JsonClient(
-            "finmind",
-            session,
-            RateLimiter(max_per_hour=finmind.max_requests_per_hour),
-            cache,
-            timeout_seconds=sources.request_timeout_seconds,
-            headers=auth_headers(secrets.get(Secrets.FINMIND_TOKEN)),
-            quota_retries=finmind.quota_retries if wait_on_quota else 0,
-            quota_wait_seconds=finmind.quota_wait_minutes * 60,
-            **retries,
-        )
+        finmind_limiter = RateLimiter(max_per_hour=finmind.max_requests_per_hour)
+
+        def finmind_http(fetched_since: datetime | None) -> JsonClient:
+            return JsonClient(
+                "finmind",
+                session,
+                finmind_limiter,
+                cache,
+                timeout_seconds=sources.request_timeout_seconds,
+                headers=auth_headers(secrets.get(Secrets.FINMIND_TOKEN)),
+                quota_retries=finmind.quota_retries if wait_on_quota else 0,
+                quota_wait_seconds=finmind.quota_wait_minutes * 60,
+                fetched_since=fetched_since,
+                **retries,
+            )
+
         tpex_http = JsonClient(
             "tpex",
             session,
             RateLimiter(sources.official.min_request_interval_seconds),
             cache,
             timeout_seconds=sources.request_timeout_seconds,
+            fetched_since=since,
             **retries,
         )
         peer_age = timedelta(days=config.markets.tw.industries.peers.cache_max_age_days)
         return cls(
             config,
             FinMindFetcher(
-                FinMindClient(finmind_http, max_age),
+                FinMindClient(finmind_http(since), max_age),
                 config.markets.tw.filing_deadlines,
                 snapshots=cache,
             ),
@@ -874,10 +889,12 @@ class MarketData:
                 RateLimiter(sources.yahoo.min_request_interval_seconds),
                 cache,
                 max_age=max_age,
+                fetched_since=since,
             ),
             TpexFetcher(tpex_http, max_age),
+            # Peer statements keep their week-long cache: no data-ready cut-off.
             peer_finmind=FinMindFetcher(
-                FinMindClient(finmind_http, peer_age),
+                FinMindClient(finmind_http(None), peer_age),
                 config.markets.tw.filing_deadlines,
                 snapshots=cache,
             ),
@@ -894,12 +911,25 @@ class MarketData:
                     RateLimiter(sources.official.min_request_interval_seconds),
                     cache,
                     timeout_seconds=sources.request_timeout_seconds,
+                    fetched_since=since,
                     **retries,
                 ),
                 max_age,
             ),
             **({"clock": clock} if clock is not None else {}),
         )
+
+
+def latest_data_ready(data_ready: time, tz: ZoneInfo, now: datetime) -> datetime:
+    """The latest ``data_ready`` moment at or before ``now``. Responses cached before it are
+    refetched, so a run after the close does not reuse data fetched that morning.
+
+    Every day counts, holidays included, so the calendar (itself fetched) is not needed; on
+    a holiday this only refetches data that has not changed.
+    """
+    local = now.astimezone(tz)
+    ready = datetime.combine(local.date(), data_ready, tz)
+    return ready if local >= ready else ready - timedelta(days=1)
 
 
 T = TypeVar("T")

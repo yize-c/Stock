@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -88,6 +88,23 @@ def test_history_cached_round_trip() -> None:
         second = f.history(Ticker("2330", Market.TWSE), date(2024, 7, 1), date(2024, 7, 2))
     assert len(rec.calls) == 1
     pd.testing.assert_frame_equal(first, second, check_dtype=False)
+
+
+def test_history_cached_before_fetched_since_is_refetched() -> None:
+    rec = Recorder(yf_frame())
+    tsmc, start, end = Ticker("2330", Market.TWSE), date(2024, 7, 1), date(2024, 7, 2)
+    with Cache(":memory:") as cache:
+        make(rec, cache).history(tsmc, start, end)
+        later = YahooFetcher(
+            TW,
+            RateLimiter(),
+            cache,
+            max_age=timedelta(hours=12),
+            fetched_since=datetime.now(UTC) + timedelta(seconds=1),
+            downloader=rec,
+        )
+        later.history(tsmc, start, end)
+    assert len(rec.calls) == 2
 
 
 def test_download_error_is_source_unavailable() -> None:

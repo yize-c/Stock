@@ -40,6 +40,16 @@ def test_stale_cache_not_served(cache: Cache) -> None:
     assert fresh is not None and stale is None
 
 
+def test_cache_fetched_before_the_cut_off_not_served(cache: Cache) -> None:
+    cache.put_raw("twse", "x", {}, "p", fetched_at=T0)
+    hour = timedelta(hours=1)
+    now = T0 + 2 * hour
+    assert cache.get_raw("twse", "x", {}, max_age=3 * hour, now=now, fetched_since=T0) is not None
+    assert (
+        cache.get_raw("twse", "x", {}, max_age=3 * hour, now=now, fetched_since=T0 + hour) is None
+    )
+
+
 def test_naive_datetimes_rejected(cache: Cache) -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         cache.put_raw("twse", "x", {}, "p", fetched_at=datetime(2026, 1, 1))

@@ -73,6 +73,7 @@ def calibration_market(config: AppConfig, *, wait_on_quota: bool = True) -> Mark
         update={
             "cache_dir": settings.cache_dir,
             "cache_max_age_hours": settings.cache_max_age_days * 24,
+            "refetch_after_data_ready": False,
         }
     )
     fixed = config.model_copy(update={"data_sources": sources})

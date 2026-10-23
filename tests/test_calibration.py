@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
 import numpy as np
@@ -442,3 +442,13 @@ def test_score_shard_scores_only_the_dates_whose_data_passed(
     assert {f"score_{k}" for k in config.research_score.preferences.options} <= set(rows)
     assert np.isfinite(ok["mdd_fwd"]) and ok["mdd_fwd"] <= 0  # prices through 2026-08-31
     assert set(pipeline.OUTCOME_COLUMNS) | {"outcome_problem"} <= set(rows.columns)
+
+
+def test_calibration_market_keeps_its_long_cache_age(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # no .env here
+    monkeypatch.setenv("FINMIND_TOKEN", "tok")
+    config = _config(cache_dir=tmp_path)
+    market = pipeline.calibration_market(config, wait_on_quota=False)
+    # Not cut at the daily data-ready time: the cache serves a fixed past date for days.
+    assert market._finmind._client._max_age == timedelta(days=config.calibration.cache_max_age_days)
+    assert market._finmind._client._client._fetched_since is None
