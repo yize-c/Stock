@@ -21,7 +21,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh api "repos/${{ github.repository }}/actions/jobs/120380345198/logs" > job.log
+          # gh api refuses output with terminal escape sequences; curl follows the redirect
+          # to the log file (without sending the token there) and sed strips the colours.
+          curl -sSfL -H "Authorization: Bearer $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/jobs/120380345198/logs" \
+            | sed -E 's/\x1b\[[0-9;]*[A-Za-z]//g' > job.log
           echo "lines $(wc -l < job.log)"
           echo "--- summary"
           grep -E "as_of 20[0-9-]+: [0-9]+ ok|^\S+ +[0-9]{4}: |nothing should be published" job.log || true
