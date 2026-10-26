@@ -1,8 +1,9 @@
 """Why every stock failed the freshness check in the 2026-10-26 daily export (run 40240981656).
 
 Prints dates only (no prices): the run's clock, the latest close the calendar expects, the last
-index close days, FinMind's trading-day schedule around the weekend, and 2330's latest priced
-day. Runs on GitHub Actions with FINMIND_TOKEN; a few FinMind requests, no cache.
+index close days, FinMind's trading-day schedule around the weekend, the latest day in other
+FinMind datasets, Yahoo and the exchanges' open data. Runs on GitHub Actions with
+FINMIND_TOKEN; a few FinMind requests, no cache.
 """
 
 from __future__ import annotations
@@ -38,6 +39,17 @@ def main() -> None:
         prices = finmind.prices("2330", today - timedelta(days=14), today)
         priced = prices.loc[prices["close"].notna(), "date"]
         print("2330 priced days", [d.isoformat() for d in list(priced)[-4:]])
+        start = today - timedelta(days=7)
+        tri = finmind.total_return_index(start, today)
+        print("total return index days", [d.isoformat() for d in list(tri["date"])[-3:]])
+        print(
+            "2330 valuation days",
+            [d.isoformat() for d in finmind.valuation_dates("2330", start, today)[-3:]],
+        )
+        yahoo = market._yahoo.taiex_history(start, today)
+        print("yahoo index days", [d.isoformat() for d in list(yahoo["date"])[-3:]])
+        official = market.official_closes()
+        print("official closes day", sorted(set(official["date"])))
 
 
 if __name__ == "__main__":
